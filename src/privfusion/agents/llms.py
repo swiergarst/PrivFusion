@@ -1,7 +1,10 @@
+import json
 import logging
 import os
 from abc import ABC, abstractmethod
 from typing import Any
+
+import requests
 
 # from ibm_watsonx_ai.metanames import GenTextParamsMetaNames
 # from langchain_ibm.chat_models import ChatWatsonx
@@ -185,4 +188,43 @@ class OllamaLLM(LLM):
             print(">>>> EXCEPTION:")
             print(e)
 
+        return result
+
+
+class WillmaLLM(LLM):
+    def __init__(self, model_name: str):
+        self.model_name = model_name
+        self.api_key = os.getenv("WILLMA_API_KEY", None)
+        if self.api_key is None:
+            raise OSError("WILLMA API key not found in environment.")
+
+    def chat(self, messages: list[Any]) -> dict[str, str]:
+        willma_base_url = "https://api.willma.surf.nl/v0"
+        headers = {"X-API-KEY": self.api_key, "Content-Type": "application/json"}  # Define python requests headers.
+
+        result: dict[str, str] = {}
+        _messages = [{"role": message.type, "content": message.content} for message in messages]
+
+        # print(f'input messages: {_messages}')
+        try:
+            # TODO: SystemMessage should be serializable but it isn't, so this is a workaround
+            _messages = [{"role": message.type, "content": message.content} for message in messages]
+            response = requests.post(
+                f"{willma_base_url}/chat/completions",
+                data=json.dumps({"model": self.model_name, "messages": _messages}),
+                headers=headers,
+                timeout=42,
+            )
+            # TODO: configure logging with logging levels (@claude probably)
+            # print(response)
+
+            result["response"] = response.json()["choices"][0]["message"]["content"]
+            result["reason"] = (
+                ""  # TODO: see if we can implement reasoning for willma (need to verify if the model has reasoning)
+            )
+        except Exception as e:
+            print(">>>> EXCEPTION:")
+            print(e)
+
+        # print(f'response:{result['response']}')
         return result

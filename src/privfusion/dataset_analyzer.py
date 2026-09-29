@@ -89,6 +89,7 @@ class DatasetAnalyzer:
                 ),
             ],
         )
+        # print(f'generate description response: {response["response"]}')
         return response["response"]
 
     def _generate_column_semantic(
