@@ -6,15 +6,20 @@ from tenacity import retry, stop_after_attempt, wait_fixed
 
 from privfusion.agents.agent_cluster import AgentCluster
 from privfusion.agents.agent_norm import AgentNorm
+from privfusion.agents.default_system_prompts import ConsolidatorPrompts
 from privfusion.agents.llms import LLM
 
 logger = logging.getLogger(__name__)
 
 
 class Consolidator:
-    def __init__(self):
+    def __init__(self, config: dict[str, Any] | None = None) -> None:
         self._number_consolidations = 0
         self._unified_schemas = []
+        if config is not None:
+            self.config = config
+        else:
+            self.config = {}
 
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
     def consolidate(self, datasets: dict[str, Any], llm: LLM):
@@ -30,7 +35,9 @@ class Consolidator:
         """
 
         logger.info("Clustering dataset features.")
-        agent_cluster = AgentCluster(llm)
+        agent_cluster = AgentCluster(
+            llm, self.config.get("cluster", {}).get("system_prompt", ConsolidatorPrompts.CLUSTER_AGENT_SYSTEM_PROMPT)
+        )
         result = agent_cluster.cluster(datasets)
 
         cf = pd.DataFrame(result)
@@ -57,7 +64,9 @@ class Consolidator:
                     },
                 )
 
-            agent_norm = AgentNorm(llm)
+            agent_norm = AgentNorm(
+                llm, self.config.get("normalize", {}).get("system_prompt", ConsolidatorPrompts.NORM_AGENT_SYSTEM_PROMPT)
+            )
             result = agent_norm.normalize(cluster_context)
 
             # map the transformation recommendations back to dataset -> column

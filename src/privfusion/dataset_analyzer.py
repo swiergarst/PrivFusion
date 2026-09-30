@@ -6,17 +6,18 @@ import pandas as pd  # type: ignore
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage  # type: ignore
 from tenacity import retry, stop_after_attempt, wait_fixed  # type: ignore
 
+from privfusion.agents.default_system_prompts import DatasetAnalyzerPrompts
 from privfusion.agents.llms import LLM
 from privfusion.data_models import DatasetInformation, SemanticInformation, SemanticRelationship, StructuralInformation
 from privfusion.utils import get_type_mapping
 
 
 class DatasetAnalyzer:
-    DESCRIPTION_SYSTEM_PROMPT = """I have a tabular dataset contisting of various columns. Given the column names and some examples as per (SAMPLE) describe the overall semantic of the dataset in a formal style. Only return the discorsive description."""
-    COLUMN_SEMANTIC_SYSTEM_PROMPT = """Given the description of a dataset (DESCRIPTION), the column type (COLUMN_TYPE) describe the semantic of the column (COLUMN) in a formal style. Only return the discorsive description."""
-    TOPICS_SYSTEM_PROMPT = """Given the dataset descripion (DESCRIPTION) and the sample (SAMPLE) list topics of the dataset. Respond with a list of topics one per line only"""
-    RELATIONSHIPS_SYSTEM_PROMPT = """Given the dataset in (SAMPLE) highlight relationships between columns in the following format: {column_name} -> {column_name} := {explanation}. Do not provide any comment."""
-    STRUCTURE_DESCRIPTION_SYSTEM_PROMPT = """Given a tabular datasets consisting of columns (COLUMN_NAMES) and some examples as per (SAMPLE), please describe the structure of the dataset to the best of your understanding. Only return the discorsive description."""
+    # DESCRIPTION_SYSTEM_PROMPT = """I have a tabular dataset contisting of various columns. Given the column names and some examples as per (SAMPLE) describe the overall semantic of the dataset in a formal style. Only return the discorsive description."""
+    # COLUMN_SEMANTIC_SYSTEM_PROMPT = """Given the description of a dataset (DESCRIPTION), the column type (COLUMN_TYPE) describe the semantic of the column (COLUMN) in a formal style. Only return the discorsive description."""
+    # TOPICS_SYSTEM_PROMPT = """Given the dataset descripion (DESCRIPTION) and the sample (SAMPLE) list topics of the dataset. Respond with a list of topics one per line only"""
+    # RELATIONSHIPS_SYSTEM_PROMPT = """Given the dataset in (SAMPLE) highlight relationships between columns in the following format: {column_name} -> {column_name} := {explanation}. Do not provide any comment."""
+    # STRUCTURE_DESCRIPTION_SYSTEM_PROMPT = """Given a tabular datasets consisting of columns (COLUMN_NAMES) and some examples as per (SAMPLE), please describe the structure of the dataset to the best of your understanding. Only return the discorsive description."""
 
     def __init__(self, llm_reference: LLM, config: dict[str, Any] | None = None) -> None:
         if config is None:
@@ -24,23 +25,23 @@ class DatasetAnalyzer:
         self._llm = llm_reference
         self._description_system_prompt = config.get(
             "description_system_prompt",
-            DatasetAnalyzer.DESCRIPTION_SYSTEM_PROMPT,
+            DatasetAnalyzerPrompts.DESCRIPTION_SYSTEM_PROMPT,
         )
         self._column_semantic_system_prompt = config.get(
             "column_semantic_system_prompt",
-            DatasetAnalyzer.COLUMN_SEMANTIC_SYSTEM_PROMPT,
+            DatasetAnalyzerPrompts.COLUMN_SEMANTIC_SYSTEM_PROMPT,
         )
         self._topics_system_prompt = config.get(
             "topics_system_prompt",
-            DatasetAnalyzer.TOPICS_SYSTEM_PROMPT,
+            DatasetAnalyzerPrompts.TOPICS_SYSTEM_PROMPT,
         )
         self._relationships_system_prompt = config.get(
             "relationships_system_prompt",
-            DatasetAnalyzer.RELATIONSHIPS_SYSTEM_PROMPT,
+            DatasetAnalyzerPrompts.RELATIONSHIPS_SYSTEM_PROMPT,
         )
         self._struct_description_system_prompt = config.get(
             "structure_description_system_prompt",
-            DatasetAnalyzer.STRUCTURE_DESCRIPTION_SYSTEM_PROMPT,
+            DatasetAnalyzerPrompts.STRUCTURE_DESCRIPTION_SYSTEM_PROMPT,
         )
 
     def extract_information_from_dataset(
