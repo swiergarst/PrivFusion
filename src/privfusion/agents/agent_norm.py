@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class AgentNorm:
-    def __init__(self, llm: LLM, system_prompt: str, **kwargs: Any):
+    def __init__(self, llm: LLM, system_prompt: str, kwargs: Any):
         self._llm = llm
         self._system_prompt = system_prompt
         self._kwargs = kwargs
@@ -26,7 +26,7 @@ class AgentNorm:
             # {"role": "user", "content": str(cluster_context)},
         ]
 
-        result = self._llm.chat(messages=messages, **self._kwargs)
+        result = self._llm.chat(messages=messages, kwargs=self._kwargs)
         print_colored_dict(result)
         try:
             normalized_cluster = json.loads(result["response"])

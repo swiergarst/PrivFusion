@@ -22,7 +22,7 @@ class Consolidator:
             self.config = {}
 
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
-    def consolidate(self, datasets: dict[str, Any], llm: LLM):
+    def consolidate(self, datasets: dict[str, Any], llm: LLM, **kwargs: Any):
         """
         Executes consolidation on the datasets
         - first runs agent_cluster to cluster the likely column attributes
@@ -36,7 +36,9 @@ class Consolidator:
 
         logger.info("Clustering dataset features.")
         agent_cluster = AgentCluster(
-            llm, self.config.get("cluster", {}).get("system_prompt", ConsolidatorPrompts.CLUSTER_AGENT_SYSTEM_PROMPT)
+            llm,
+            self.config.get("cluster", {}).get("system_prompt", ConsolidatorPrompts.CLUSTER_AGENT_SYSTEM_PROMPT),
+            kwargs,
         )
         result = agent_cluster.cluster(datasets)
 

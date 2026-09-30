@@ -198,7 +198,7 @@ class WillmaLLM(LLM):
         if self.api_key is None:
             raise OSError("WILLMA API key not found in environment.")
 
-    def chat(self, messages: list[Any]) -> dict[str, str]:
+    def chat(self, messages: list[Any], **kwargs: Any) -> dict[str, str]:
         willma_base_url = "https://api.willma.surf.nl/v0"
         headers = {"X-API-KEY": self.api_key, "Content-Type": "application/json"}  # Define python requests headers.
 
@@ -214,11 +214,14 @@ class WillmaLLM(LLM):
                 data=json.dumps({"model": self.model_name, "messages": _messages}),
                 headers=headers,
                 timeout=42,
-            )
+            ).json()
             # TODO: configure logging with logging levels (@claude probably)
             # print(response)
+            if "error" in response:
+                raise ValueError(f'error from willma: {response['message']}')
+            # print(response.json())
 
-            result["response"] = response.json()["choices"][0]["message"]["content"]
+            result["response"] = response["choices"][0]["message"]["content"]
             result["reason"] = (
                 ""  # TODO: see if we can implement reasoning for willma (need to verify if the model has reasoning)
             )
