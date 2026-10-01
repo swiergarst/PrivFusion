@@ -1,8 +1,12 @@
+import logging
+
 import pandas as pd
+
+logging.basicConfig(level=logging.DEBUG)
+
 
 from privfusion.agents.llms import WillmaLLM
 from privfusion.consolidater import Consolidator
-from privfusion.data_models import DatasetInformation, SemanticInformation, StructuralInformation
 from privfusion.dataset_analyzer import DatasetAnalyzer
 
 dataset1 = pd.read_csv("data/covid_global.csv")
@@ -18,23 +22,23 @@ analyzer = DatasetAnalyzer(llm)
 
 print("analysing datasets..")
 
-# dataset1_info = analyzer.extract_information_from_dataset("covid", dataset1)
-# dataset2_info = analyzer.extract_information_from_dataset("covid", dataset2)
-
-# datasets = {
-#     "dataset1": {"data": dataset1, "info": dataset1_info},
-#     "dataset2": {"data": dataset2, "info": dataset2_info},
-# }
-
-
-mock_semantics = SemanticInformation(description="", column_types=[], column_semantic=[], dataset_topics=[])
-mock_structural = StructuralInformation(names=[], types=[], constraints=[], description="")
-mock_info = DatasetInformation(name="mock", semantic=mock_semantics, structure=mock_structural, relationships=[])
+dataset1_info = analyzer.extract_information_from_dataset("covid-global", dataset1)
+dataset2_info = analyzer.extract_information_from_dataset("covid-indonesia", dataset2)
 
 datasets = {
-    "dataset1": {"data": dataset1, "info": mock_info},
-    "dataset2": {"data": dataset2, "info": mock_info},
+    "dataset1": {"data": dataset1, "info": dataset1_info},
+    "dataset2": {"data": dataset2, "info": dataset2_info},
 }
+
+
+# mock_semantics = SemanticInformation(description="", column_types=[], column_semantic=[], dataset_topics=[])
+# mock_structural = StructuralInformation(names=[], types=[], constraints=[], description="")
+# mock_info = DatasetInformation(name="mock", semantic=mock_semantics, structure=mock_structural, relationships=[])
+
+# datasets = {
+#     "dataset1": {"data": dataset1, "info": mock_info},
+#     "dataset2": {"data": dataset2, "info": mock_info},
+# }
 
 
 print("datasets analysed, running consolidator..")

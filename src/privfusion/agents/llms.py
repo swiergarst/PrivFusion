@@ -205,7 +205,7 @@ class WillmaLLM(LLM):
         result: dict[str, str] = {}
         _messages = [{"role": message.type, "content": message.content} for message in messages]
 
-        # print(f'input messages: {_messages}')
+        logger.debug(f"input messages: {_messages}")
         try:
             # TODO: SystemMessage should be serializable but it isn't, so this is a workaround
             _messages = [{"role": message.type, "content": message.content} for message in messages]
@@ -218,8 +218,8 @@ class WillmaLLM(LLM):
             # TODO: configure logging with logging levels (@claude probably)
             # print(response)
             if "error" in response:
-                raise ValueError(f'error from willma: {response['message']}')
-            # print(response.json())
+                raise ValueError(f'error from willma: {response['message']}, full response: {response}')
+            logger.debug(response.json())
 
             result["response"] = response["choices"][0]["message"]["content"]
             result["reason"] = (
