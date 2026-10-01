@@ -3,6 +3,7 @@ from unittest.mock import MagicMock
 import pandas as pd
 from faker import Faker
 
+from privfusion.data_models import DatasetInformation, SemanticInformation, StructuralInformation
 from privfusion.dataset_analyzer import DatasetAnalyzer
 
 
@@ -43,3 +44,18 @@ def test_semantic(faker: Faker) -> None:
     semantic = analyzer.extract_information_from_dataset("my_dataset", dataset).semantic
 
     assert semantic is not None
+
+
+def test_store_dataset_information() -> None:
+    mock_semantics = SemanticInformation(description="", column_types=[], column_semantic=[], dataset_topics=[])
+    mock_structural = StructuralInformation(names=[], types=[], constraints=[], description="")
+    mock_info = DatasetInformation(name="mock", semantic=mock_semantics, structure=mock_structural, relationships=[])
+
+    mock_info.write("test_dataset.json")
+
+    # TODO: have a different initialization from the original
+    mock_info_recovered = DatasetInformation(
+        name="mock", semantic=mock_semantics, structure=mock_structural, relationships=[]
+    ).read("test_dataset.json")
+
+    assert mock_info.__eq__(mock_info_recovered)
