@@ -32,9 +32,11 @@ from __future__ import annotations
 
 import copy
 import io
+import logging
 import os
 import re
 import textwrap
+import time
 import traceback
 from contextlib import redirect_stdout
 from dataclasses import dataclass, field
@@ -46,6 +48,18 @@ from dotenv import load_dotenv
 from langchain.agents import create_agent
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
+
+fileLogger = logging.getLogger("localModifLogger")
+fileLogger.setLevel(logging.INFO)
+fileLogger.propagate = False
+
+handler = logging.FileHandler(f"logs/local_modif_logs_{time.time()}.log")
+handler.setFormatter(logging.Formatter("%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+fileLogger.addHandler(handler)
+
+# console_handler = logging.StreamHandler()
+# console_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S'))
+# fileLogger.addHandler(console_handler)
 
 # --------------------------------------------------------------------------- #
 # Config
@@ -130,6 +144,72 @@ def exec_on(dfs: dict[str, pd.DataFrame], code: str) -> tuple[dict[str, pd.DataF
     return result, out.getvalue()
 
 
+def _extract_message_info(msg) -> dict:
+    """Extract only the relevant info from a LangChain message."""
+    info = {"role": "unknown", "content": "", "tool_calls": [], "tool_outputs": []}
+
+    # Determine role
+    msg_type = type(msg).__name__
+    if msg_type in ("HumanMessage", "HumanMessageChunk"):
+        info["role"] = "user"
+    elif msg_type in ("AIMessage", "AIMessageChunk"):
+        info["role"] = "assistant"
+    elif msg_type in ("SystemMessage", "SystemMessageChunk"):
+        info["role"] = "system"
+    elif msg_type in ("ToolMessage", "ToolMessageChunk"):
+        info["role"] = "tool"
+        info["tool_outputs"].append(
+            {
+                "tool_call_id": getattr(msg, "tool_call_id", "unknown"),
+                "content": str(msg.content)[:500],  # truncate
+            }
+        )
+
+    # Extract content (handle both str and list formats)
+    content = msg.content
+    if isinstance(content, str):
+        info["content"] = content
+    elif isinstance(content, list):
+        # Handle content blocks like [{"type": "text", "text": "..."}]
+        info["content"] = "".join(block.get("text", "") if isinstance(block, dict) else str(block) for block in content)
+
+    # Extract tool calls
+    if hasattr(msg, "tool_calls") and msg.tool_calls:
+        for tc in msg.tool_calls:
+            info["tool_calls"].append({"name": tc.get("name", "unknown"), "args": tc.get("args", {})})
+
+    return info
+
+
+def _format_messages_for_logging(messages) -> str:
+    """Format a list of messages for clean logging."""
+    lines = []
+    for i, msg in enumerate(messages, 1):
+        info = _extract_message_info(msg)
+        prefix = f"[{i}] {info['role'].upper()}:"
+
+        # Content
+        if info["content"]:
+            content_preview = info["content"][:300] + "..." if len(info["content"]) > 300 else info["content"]
+            lines.append(f"{prefix} {content_preview}")
+        else:
+            lines.append(prefix)
+
+        # Tool calls
+        if info["tool_calls"]:
+            for tc in info["tool_calls"]:
+                args_str = str(tc["args"])[:100] + "..." if len(str(tc["args"])) > 100 else str(tc["args"])
+                lines.append(f"    -> TOOL: {tc['name']}({args_str})")
+
+        # Tool outputs
+        if info["tool_outputs"]:
+            for to in info["tool_outputs"]:
+                output_preview = to["content"][:200] + "..." if len(to["content"]) > 200 else to["content"]
+                lines.append(f"    <- RESULT: {output_preview}")
+
+    return "\n".join(lines)
+
+
 # --------------------------------------------------------------------------- #
 # Session state shared by all tools
 # --------------------------------------------------------------------------- #
@@ -165,6 +245,11 @@ def build_tools(session: Session) -> list:
         Returns:
             Formatted search results with titles, URLs, and snippets
         """
+        fileLogger.info(
+            f"tool call: search_web(query='{query[:100]}...')"
+            if len(query) > 100
+            else f"tool call: search_web(query='{query}')"
+        )
         try:
             from urllib.parse import quote_plus
 
@@ -192,16 +277,28 @@ def build_tools(session: Session) -> list:
                 results.append(f"Title: {title}\nURL: {href}\nSnippet: {snippet}\n")
 
             if not results:
+                fileLogger.info("tool result: search_web -> No search results found.")
                 return "No search results found."
 
-            return "\n".join(results)
+            result_str = "\n".join(results)
+            fileLogger.info(
+                f"tool result: search_web -> {result_str[:300]}..."
+                if len(result_str) > 300
+                else f"tool result: search_web -> {result_str}"
+            )
+            return result_str
         except Exception as e:
-            return f"Search error: {str(e)}"
+            error_msg = f"Search error: {str(e)}"
+            fileLogger.info(f"tool result: search_web -> ERROR: {error_msg}")
+            return error_msg
 
     @tool
     def list_dataframes() -> str:
         """List the currently loaded DataFrames with their shapes (reflects all committed changes)."""
-        return "\n".join(f"dfs[{n!r}]: shape={df.shape}" for n, df in session.working.items())
+        fileLogger.info("tool call: list_dataframes()")
+        result = "\n".join(f"dfs[{n!r}]: shape={df.shape}" for n, df in session.working.items())
+        fileLogger.info(f"tool result: list_dataframes -> {result}")
+        return result
 
     @tool
     def inspect_dataframe(name: str, n_rows: int = 5) -> str:
@@ -211,8 +308,11 @@ def build_tools(session: Session) -> list:
             name: key in `dfs` (the CSV file stem).
             n_rows: number of sample rows to show (max 50).
         """
+        fileLogger.info(f"tool call: inspect_dataframe(name='{name}', n_rows={n_rows})")
         if name not in session.working:
-            return f"ERROR: no DataFrame named {name!r}. Available: {list(session.working)}"
+            error_msg = f"ERROR: no DataFrame named {name!r}. Available: {list(session.working)}"
+            fileLogger.info(f"tool result: inspect_dataframe -> {error_msg}")
+            return error_msg
         df = session.working[name]
         n_rows = max(1, min(int(n_rows), 50))
         info = io.StringIO()
@@ -221,11 +321,17 @@ def build_tools(session: Session) -> list:
             desc = df.describe(include="all").T.to_string()
         except Exception:
             desc = "(describe() unavailable)"
-        return truncate(
+        result = truncate(
             f"shape: {df.shape}\n\n{info.getvalue()}\n"
             f"head({n_rows}):\n{df.head(n_rows).to_string()}\n\n"
             f"describe:\n{desc}"
         )
+        fileLogger.info(
+            f"tool result: inspect_dataframe -> {result[:300]}..."
+            if len(result) > 300
+            else f"tool result: inspect_dataframe -> {result}"
+        )
+        return result
 
     @tool
     def explore(code: str) -> str:
@@ -238,12 +344,20 @@ def build_tools(session: Session) -> list:
         Args:
             code: Python code using `dfs`, `pd`, `np`.
         """
+        code_preview = code[:100].replace("\n", " ") + "..." if len(code) > 100 else code.replace("\n", " ")
+        fileLogger.info(f"tool call: explore(code='{code_preview}')")
         scratch = copy.deepcopy(session.working)
         try:
             _, out = exec_on(scratch, strip_fences(code))
         except Exception:
-            return "ERROR:\n" + truncate(traceback.format_exc(limit=3))
-        return truncate(out) if out.strip() else "(code ran fine but printed nothing; use print())"
+            error_msg = "ERROR:\n" + truncate(traceback.format_exc(limit=3))
+            fileLogger.info(f"tool result: explore -> {error_msg}")
+            return error_msg
+        result = truncate(out) if out.strip() else "(code ran fine but printed nothing; use print())"
+        fileLogger.info(
+            f"tool result: explore -> {result[:300]}..." if len(result) > 300 else f"tool result: explore -> {result}"
+        )
+        return result
 
     @tool
     def apply_transformation(description: str, code: str) -> str:
@@ -257,12 +371,16 @@ def build_tools(session: Session) -> list:
             description: one short sentence describing this step.
             code: Python code that modifies the `dfs` dict in place or reassigns entries.
         """
+        code_preview = code[:100].replace("\n", " ") + "..." if len(code) > 100 else code.replace("\n", " ")
+        fileLogger.info(f"tool call: apply_transformation(description='{description}', code='{code_preview}')")
         code = strip_fences(code)
         candidate = copy.deepcopy(session.working)
         try:
             candidate, out = exec_on(candidate, code)
         except Exception:
-            return "ERROR (nothing was changed):\n" + truncate(traceback.format_exc(limit=3))
+            error_msg = "ERROR (nothing was changed):\n" + truncate(traceback.format_exc(limit=3))
+            fileLogger.info(f"tool result: apply_transformation -> {error_msg}")
+            return error_msg
 
         session.snapshots.append(session.working)
         session.working = candidate
@@ -272,16 +390,26 @@ def build_tools(session: Session) -> list:
         msg = f"OK. Committed step {len(session.steps)}. Shapes now -> {shapes}"
         if out.strip():
             msg += f"\nstdout:\n{truncate(out, 1500)}"
+        fileLogger.info(
+            f"tool result: apply_transformation -> {msg[:300]}..."
+            if len(msg) > 300
+            else f"tool result: apply_transformation -> {msg}"
+        )
         return msg
 
     @tool
     def undo_last_transformation() -> str:
         """Roll back the most recently committed transformation."""
+        fileLogger.info("tool call: undo_last_transformation()")
         if not session.steps:
-            return "Nothing to undo."
+            result = "Nothing to undo."
+            fileLogger.info(f"tool result: undo_last_transformation -> {result}")
+            return result
         removed = session.steps.pop()
         session.working = session.snapshots.pop()
-        return f"Undid step: {removed.description!r}. {len(session.steps)} step(s) remain."
+        result = f"Undid step: {removed.description!r}. {len(session.steps)} step(s) remain."
+        fileLogger.info(f"tool result: undo_last_transformation -> {result}")
+        return result
 
     return [search_web, list_dataframes, inspect_dataframe, explore, apply_transformation, undo_last_transformation]
 
@@ -382,8 +510,8 @@ class CSVAgent:
         llm = ChatOpenAI(
             temperature=0,
             model=os.environ.get("LLM_MODEL"),
-            openai_api_key=os.environ.get("OPENAI_API_KEY"),
-            openai_api_base=os.environ.get("OPENAI_BASE_URL"),
+            openai_api_key=os.environ.get("WILLMA_API_KEY"),
+            openai_api_base=os.environ.get("WILLMA_BASE_URL"),
         )
         agent = create_agent(
             model=llm,
@@ -395,10 +523,13 @@ class CSVAgent:
         user_msg = f"Loaded DataFrames: {names}\n\nInstruction:\n{instruction}"
 
         try:
+            fileLogger.info(f">>> LLM REQUEST <<<\n{user_msg}")
             state = agent.invoke(
                 {"messages": [{"role": "user", "content": user_msg}]},
                 config={"recursion_limit": self.recursion_limit},
             )
+            fileLogger.info(f'>>> LLM RESPONSE <<<\n{_format_messages_for_logging(state["messages"])}')
+            fileLogger.info("--------------------------------------------------------------")
             summary = _message_text(state["messages"][-1])
         except Exception as e:  # includes GraphRecursionError
             return AgentResult(success=False, steps=session.steps, error=f"{type(e).__name__}: {e}")

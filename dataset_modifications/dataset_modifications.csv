@@ -1,0 +1,108 @@
+cluster_id,feature_name,dataset,norm_uri,norm_feature_name,norm_value_structure,transformation
+1,Unnamed: 0,covid-global,http://www.w3.org/2001/XMLSchema#Number,row_index,"A non‑negative integer representing the position of the record in the dataset (0, 1, 2, ...). Must conform to the XML Schema datatype xsd:Number (integer).",No transformation needed; the column already contains non‑negative integer values that match the selected xsd:Number datatype and the unified feature definition.
+1,Unnamed: 0,covid-indonesia,http://www.w3.org/2001/XMLSchema#Number,row_index,"A non‑negative integer representing the position of the record in the dataset (0, 1, 2, ...). Must conform to the XML Schema datatype xsd:Number (integer).",No transformation needed; the column already contains non‑negative integer values that match the selected xsd:Number datatype and the unified feature definition.
+2,iso_code,covid-global,https://dbpedia.org/page/ISO_3166-3,iso_code,"The feature represents ISO 3166‑3 codes, i.e., four‑character alphanumeric identifiers for countries that have been removed from the ISO 3166‑1 list (former country codes). Valid values are strings such as ""DDDE"" (German Democratic Republic) or ""SUHH"" (USSR). No subdivision codes (e.g., ""ID-JK"") or current three‑letter country codes (e.g., ""AFG"") are permitted under this URI.","Map the existing three‑letter ISO 3166‑1 alpha‑3 codes (e.g., ""AFG"", ""ALB"") to their corresponding ISO 3166‑3 codes where applicable (e.g., ""AFG"" → ""AFGG"" for the former name ""Afghanistan"", if such a former‑country mapping exists). If no ISO 3166‑3 code exists for a current country, annotate the value as ""UNKNOWN"" or remove the record, because ISO 3166‑3 only covers former countries."
+2,Location ISO Code,covid-indonesia,https://dbpedia.org/page/ISO_3166-3,iso_code,"The feature represents ISO 3166‑3 codes, i.e., four‑character alphanumeric identifiers for countries that have been removed from the ISO 3166‑1 list (former country codes). Valid values are strings such as ""DDDE"" (German Democratic Republic) or ""SUHH"" (USSR). No subdivision codes (e.g., ""ID-JK"") or current three‑letter country codes (e.g., ""AFG"") are permitted under this URI.","Convert each subdivision code (e.g., ""ID-JK"", ""ID-RI"") to the ISO 3166‑3 code of the corresponding former country, if a relevant former‑country mapping exists (e.g., ""ID"" → ""IDDD"" for the former entity ""Indonesia"" if defined). Values that cannot be mapped to a valid ISO 3166‑3 code must be replaced with ""UNKNOWN"" or omitted, as ISO 3166‑3 does not accept subdivision identifiers."
+3,continent,covid-global,https://dbpedia.org/page/Continent,continent,"The feature represents a world continent. Valid values are the standard continent names (e.g., Asia, Europe, Africa, North America, South America, Oceania, Antarctica). Values must be strings matching one of these names (case‑insensitive) and should not contain missing or null entries.","Replace any `nan` entries with a null placeholder or remove the rows. Verify that all remaining values are among the allowed continent names; if any non‑standard spelling appears, map it to the correct name."
+3,Continent,covid-indonesia,https://dbpedia.org/page/Continent,continent,"The feature represents a world continent. Valid values are the standard continent names (e.g., Asia, Europe, Africa, North America, South America, Oceania, Antarctica). Values must be strings matching one of these names (case‑insensitive) and should not contain missing or null entries.","Change the feature's URI from `http://xmlns.com/foaf/0.1/Person` to `https://dbpedia.org/page/Continent`. The existing value `'Asia'` already conforms to the allowed continent list, so no further data changes are needed."
+4,location,covid-global,https://dbpedia.org/page/Country,location,"String values representing sovereign country names as defined by DBpedia Country entities (e.g., ""Afghanistan"", ""Indonesia""). Only top‑level country identifiers are permitted; sub‑national regions are not valid.",No transformation needed; all values already correspond to country names.
+4,Location,covid-indonesia,https://dbpedia.org/page/Country,location,"String values representing sovereign country names as defined by DBpedia Country entities (e.g., ""Afghanistan"", ""Indonesia""). Only top‑level country identifiers are permitted; sub‑national regions are not valid.","Replace each sub‑national region (e.g., ""DKI Jakarta"", ""Riau"", ""Jawa Barat"", ""Banten"") with the country name ""Indonesia"" so that the feature contains only country‑level values."
+5,date,covid-global,http://www.w3.org/2001/XMLSchema#DateTime,date,"Values must be calendar dates in ISO‑8601 format (YYYY‑MM‑DD). The datatype is xs:dateTime, but only the date component is used, without time‑zone offsets.",No transformation needed; data already conforms to ISO‑8601 date format.
+5,Date,covid-indonesia,http://www.w3.org/2001/XMLSchema#DateTime,date,"Values must be calendar dates in ISO‑8601 format (YYYY‑MM‑DD). The datatype is xs:dateTime, but only the date component is used, without time‑zone offsets.","Reformat each entry from M/D/YYYY (e.g., 3/1/2020) to ISO‑8601 YYYY‑MM‑DD (e.g., 2020-03-01) before loading."
+6,total_cases,covid-global,http://www.w3.org/2001/XMLSchema#Number,total_cases,The feature represents the cumulative number of COVID‑19 cases reported. Valid values are non‑negative numeric counts (integers or real numbers) without units.,No transformation needed; the data already conforms to the selected numeric URI and feature definition.
+6,Total Cases,covid-indonesia,http://www.w3.org/2001/XMLSchema#Number,total_cases,The feature represents the cumulative number of COVID‑19 cases reported. Valid values are non‑negative numeric counts (integers or real numbers) without units.,No transformation needed; the data already conforms to the selected numeric URI and feature definition.
+7,new_cases,covid-global,http://www.w3.org/2001/XMLSchema#Number,new_cases,The feature represents the count of newly reported COVID‑19 cases for a given observation period. Valid values are non‑negative numeric values (integers or decimals) indicating the number of cases. Zero is allowed to indicate no new cases.,No transformation needed; data already conforms to the selected URI and value structure.
+7,New Cases,covid-indonesia,http://www.w3.org/2001/XMLSchema#Number,new_cases,The feature represents the count of newly reported COVID‑19 cases for a given observation period. Valid values are non‑negative numeric values (integers or decimals) indicating the number of cases. Zero is allowed to indicate no new cases.,No transformation needed; data already conforms to the selected URI and value structure.
+8,total_deaths,covid-global,http://www.w3.org/2001/XMLSchema#Number,total_deaths,"Numeric count of total deaths (non‑negative numbers, typically integers). Valid values are 0, 1, 2, …; missing values may be represented as NaN or left empty.",No transformation needed – data already matches the selected URI and value structure.
+8,Total Deaths,covid-indonesia,http://www.w3.org/2001/XMLSchema#Number,total_deaths,"Numeric count of total deaths (non‑negative numbers, typically integers). Valid values are 0, 1, 2, …; missing values may be represented as NaN or left empty.",No transformation needed – data already matches the selected URI and value structure.
+9,new_deaths,covid-global,http://www.w3.org/2001/XMLSchema#Number,new_deaths,"Non‑negative numeric count of newly reported COVID‑19 deaths for a given reporting period. Valid values are whole numbers (0, 1, 2, …). Missing observations should be represented as null/NaN and omitted from statistical calculations.",Replace NaN entries with a null placeholder (or appropriate imputation) and cast all values to non‑negative integers to match the XSD Number type.
+9,New Deaths,covid-indonesia,http://www.w3.org/2001/XMLSchema#Number,new_deaths,"Non‑negative numeric count of newly reported COVID‑19 deaths for a given reporting period. Valid values are whole numbers (0, 1, 2, …). Missing observations should be represented as null/NaN and omitted from statistical calculations.","Rename the feature to ""new_deaths"" for consistency and ensure the values are stored as non‑negative integers (no further transformation needed for the data itself)."
+10,total_cases_per_million,covid-global,http://dbpedia.org/property/totalCasesPerMillion,total_cases_per_million,A numeric (floating‑point) value representing the total number of confirmed COVID‑19 cases per one million inhabitants. Values must be non‑negative numbers; scientific notation or plain decimal representation is accepted.,No transformation needed – the data are already numeric counts per million that match the selected URI and value structure.
+10,Total Cases per Million,covid-indonesia,http://dbpedia.org/property/totalCasesPerMillion,total_cases_per_million,A numeric (floating‑point) value representing the total number of confirmed COVID‑19 cases per one million inhabitants. Values must be non‑negative numbers; scientific notation or plain decimal representation is accepted.,No transformation needed – the data are already numeric counts per million that match the selected URI and value structure.
+11,new_cases_per_million,covid-global,http://www.w3.org/2001/XMLSchema#Number,new_cases_per_million,Numeric (decimal) values representing the count of newly reported COVID‑19 cases per one million people in the population. Values must be non‑negative numbers; zero indicates no new cases.,No transformation needed – the data already conforms to the selected XSD Number type and the unified feature definition.
+11,New Cases per Million,covid-indonesia,http://www.w3.org/2001/XMLSchema#Number,new_cases_per_million,Numeric (decimal) values representing the count of newly reported COVID‑19 cases per one million people in the population. Values must be non‑negative numbers; zero indicates no new cases.,"No transformation needed – rename the field to the unified snake_case name ""new_cases_per_million"" if required; the numeric values already match the selected type."
+12,total_deaths_per_million,covid-global,http://www.w3.org/2001/XMLSchema#Number,total_deaths_per_million,A non‑negative numeric value (float) representing the total number of COVID‑19 deaths per one million inhabitants. Valid values are finite numbers ≥ 0. Missing values should be encoded as null (or omitted) rather than NaN.,Replace NaN entries with null (or remove them). All remaining values already conform to the selected XSD Number type.
+12,Total Deaths per Million,covid-indonesia,http://www.w3.org/2001/XMLSchema#Number,total_deaths_per_million,A non‑negative numeric value (float) representing the total number of COVID‑19 deaths per one million inhabitants. Valid values are finite numbers ≥ 0. Missing values should be encoded as null (or omitted) rather than NaN.,No transformation needed; values already conform to the selected XSD Number type.
+13,new_deaths_per_million,covid-global,http://www.w3.org/2001/XMLSchema#Number,new_deaths_per_million,"Numeric (XSD Number) representing the count of newly reported COVID‑19 deaths per one million inhabitants on a given day. Valid values are non‑negative real numbers (including decimals). Missing observations should be represented as null/empty, not as NaN.",Replace any NaN entries with null (or remove the row). Ensure all remaining values are non‑negative numbers and round to an appropriate number of decimal places if needed.
+13,New Deaths per Million,covid-indonesia,http://www.w3.org/2001/XMLSchema#Number,new_deaths_per_million,"Numeric (XSD Number) representing the count of newly reported COVID‑19 deaths per one million inhabitants on a given day. Valid values are non‑negative real numbers (including decimals). Missing observations should be represented as null/empty, not as NaN.",Confirm that all values are non‑negative numbers; no transformation required other than renaming the feature to the unified snake_case name.
+14,population,covid-global,http://www.w3.org/2001/XMLSchema#Number,population,Numeric population count for a country/region. Values must be non‑negative numbers (integers or decimals) representing the total number of people. The unit is persons.,No transformation required; data already conforms to the selected numeric population feature.
+14,Population,covid-indonesia,http://www.w3.org/2001/XMLSchema#Number,population,Numeric population count for a country/region. Values must be non‑negative numbers (integers or decimals) representing the total number of people. The unit is persons.,No transformation required; data already conforms to the selected numeric population feature.
+15,population_density,covid-global,http://www.w3.org/2001/XMLSchema#Number,population_density,Numeric (float) representing population density (persons per square kilometre). Values must be non‑negative numbers; missing or undefined values should be expressed as null (or omitted).,Replace NaN entries with null (or another explicit missing‑value marker) and verify all remaining values are non‑negative numbers.
+15,Population Density,covid-indonesia,http://www.w3.org/2001/XMLSchema#Number,population_density,Numeric (float) representing population density (persons per square kilometre). Values must be non‑negative numbers; missing or undefined values should be expressed as null (or omitted).,No transformation required; values already conform to the selected numeric population density representation.
+9999,new_cases_smoothed,covid-global,,,,
+9999,new_cases_smoothed_per_million,covid-global,,,,
+9999,new_deaths_smoothed,covid-global,,,,
+9999,new_deaths_smoothed_per_million,covid-global,,,,
+9999,reproduction_rate,covid-global,,,,
+9999,icu_patients,covid-global,,,,
+9999,icu_patients_per_million,covid-global,,,,
+9999,hosp_patients,covid-global,,,,
+9999,hosp_patients_per_million,covid-global,,,,
+9999,weekly_icu_admissions,covid-global,,,,
+9999,weekly_icu_admissions_per_million,covid-global,,,,
+9999,weekly_hosp_admissions,covid-global,,,,
+9999,weekly_hosp_admissions_per_million,covid-global,,,,
+9999,new_tests,covid-global,,,,
+9999,total_tests,covid-global,,,,
+9999,total_tests_per_thousand,covid-global,,,,
+9999,new_tests_per_thousand,covid-global,,,,
+9999,new_tests_smoothed,covid-global,,,,
+9999,new_tests_smoothed_per_thousand,covid-global,,,,
+9999,positive_rate,covid-global,,,,
+9999,tests_per_case,covid-global,,,,
+9999,tests_units,covid-global,,,,
+9999,total_vaccinations,covid-global,,,,
+9999,people_vaccinated,covid-global,,,,
+9999,people_fully_vaccinated,covid-global,,,,
+9999,total_boosters,covid-global,,,,
+9999,new_vaccinations,covid-global,,,,
+9999,new_vaccinations_smoothed,covid-global,,,,
+9999,total_vaccinations_per_hundred,covid-global,,,,
+9999,people_vaccinated_per_hundred,covid-global,,,,
+9999,people_fully_vaccinated_per_hundred,covid-global,,,,
+9999,total_boosters_per_hundred,covid-global,,,,
+9999,new_vaccinations_smoothed_per_million,covid-global,,,,
+9999,new_people_vaccinated_smoothed,covid-global,,,,
+9999,new_people_vaccinated_smoothed_per_hundred,covid-global,,,,
+9999,stringency_index,covid-global,,,,
+9999,median_age,covid-global,,,,
+9999,aged_65_older,covid-global,,,,
+9999,aged_70_older,covid-global,,,,
+9999,gdp_per_capita,covid-global,,,,
+9999,extreme_poverty,covid-global,,,,
+9999,cardiovasc_death_rate,covid-global,,,,
+9999,diabetes_prevalence,covid-global,,,,
+9999,female_smokers,covid-global,,,,
+9999,male_smokers,covid-global,,,,
+9999,handwashing_facilities,covid-global,,,,
+9999,hospital_beds_per_thousand,covid-global,,,,
+9999,life_expectancy,covid-global,,,,
+9999,human_development_index,covid-global,,,,
+9999,excess_mortality_cumulative_absolute,covid-global,,,,
+9999,excess_mortality_cumulative,covid-global,,,,
+9999,excess_mortality,covid-global,,,,
+9999,excess_mortality_cumulative_per_million,covid-global,,,,
+9999,Location Level,covid-indonesia,,,,
+9999,City or Regency,covid-indonesia,,,,
+9999,Province,covid-indonesia,,,,
+9999,Country,covid-indonesia,,,,
+9999,Island,covid-indonesia,,,,
+9999,Time Zone,covid-indonesia,,,,
+9999,Special Status,covid-indonesia,,,,
+9999,Total Regencies,covid-indonesia,,,,
+9999,Total Cities,covid-indonesia,,,,
+9999,Total Districts,covid-indonesia,,,,
+9999,Total Urban Villages,covid-indonesia,,,,
+9999,Total Rural Villages,covid-indonesia,,,,
+9999,Area (km2),covid-indonesia,,,,
+9999,New Recovered,covid-indonesia,,,,
+9999,New Active Cases,covid-indonesia,,,,
+9999,Total Recovered,covid-indonesia,,,,
+9999,Total Active Cases,covid-indonesia,,,,
+9999,Longitude,covid-indonesia,,,,
+9999,Latitude,covid-indonesia,,,,
+9999,Total Deaths per 100rb,covid-indonesia,,,,
+9999,Case Fatality Rate,covid-indonesia,,,,
+9999,Case Recovered Rate,covid-indonesia,,,,
+9999,Growth Factor of New Cases,covid-indonesia,,,,
+9999,Growth Factor of New Deaths,covid-indonesia,,,,
