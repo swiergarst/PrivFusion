@@ -2,7 +2,7 @@ import logging
 
 import pandas as pd
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 
 
 from privfusion.agents.llms import WillmaLLM
@@ -26,8 +26,8 @@ dataset1_info = analyzer.extract_information_from_dataset("covid-global", datase
 dataset2_info = analyzer.extract_information_from_dataset("covid-indonesia", dataset2)
 
 datasets = {
-    "dataset1": {"data": dataset1, "info": dataset1_info},
-    "dataset2": {"data": dataset2, "info": dataset2_info},
+    "covid-global": {"data": dataset1, "info": dataset1_info},
+    "covid-indonesia": {"data": dataset2, "info": dataset2_info},
 }
 
 
@@ -50,6 +50,7 @@ result = consolidator.consolidate(datasets, llm)
 # View results
 print(result[["dataset", "feature_name", "cluster_id", "norm_feature_name"]])
 
+result.to_csv("quickstart_result.csv", index=False)
 # print(dataset1_info)
 
 

@@ -67,7 +67,9 @@ class Consolidator:
                 )
 
             agent_norm = AgentNorm(
-                llm, self.config.get("normalize", {}).get("system_prompt", ConsolidatorPrompts.NORM_AGENT_SYSTEM_PROMPT)
+                llm,
+                self.config.get("normalize", {}).get("system_prompt", ConsolidatorPrompts.NORM_AGENT_SYSTEM_PROMPT),
+                kwargs,
             )
             result = agent_norm.normalize(cluster_context)
 

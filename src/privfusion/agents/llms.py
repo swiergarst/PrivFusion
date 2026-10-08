@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import time
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -13,6 +14,14 @@ from litellm import completion
 from litellm.exceptions import NotFoundError, RateLimitError, Timeout
 
 logger = logging.getLogger(__name__)
+
+# setup a separate logger that logs all input and output to and from the LLM
+llmLogger = logging.getLogger("llmLogger")
+llmLogger.setLevel(logging.INFO)
+llmLogger.propagate = False
+
+handler = logging.FileHandler(f"logs/llm_logs_{time.time()}.log")
+llmLogger.addHandler(handler)
 
 
 class LLM(ABC):
@@ -94,10 +103,10 @@ class LiteLLMLLM(LLM):
             result["reason"] = reason
 
         except Timeout as e:
-            print(f"Endpoint time out error. Check Metrics Dashboard:\n{e.message}")
+            llmLogger.error(f"Endpoint time out error. Check Metrics Dashboard:\n{e.message}")
 
         except RateLimitError as e:
-            print(
+            llmLogger.error(
                 f"Endpoint user rate limit is exceeded\n{e.message}",
             )
 
@@ -205,7 +214,7 @@ class WillmaLLM(LLM):
         result: dict[str, str] = {}
         _messages = [{"role": message.type, "content": message.content} for message in messages]
 
-        logger.debug(f"input messages: {_messages}")
+        llmLogger.info(f"input messages: {_messages}")
         try:
             # TODO: SystemMessage should be serializable but it isn't, so this is a workaround
             _messages = [{"role": message.type, "content": message.content} for message in messages]
@@ -219,15 +228,15 @@ class WillmaLLM(LLM):
             # print(response)
             if "error" in response:
                 raise ValueError(f'error from willma: {response['message']}, full response: {response}')
-            logger.debug(response.json())
+            llmLogger.info(f"response: {response}")
 
             result["response"] = response["choices"][0]["message"]["content"]
             result["reason"] = (
                 ""  # TODO: see if we can implement reasoning for willma (need to verify if the model has reasoning)
             )
         except Exception as e:
-            print(">>>> EXCEPTION:")
-            print(e)
+            llmLogger.error(">>>> EXCEPTION:")
+            llmLogger.error(e)
 
         # print(f'response:{result['response']}')
         return result
