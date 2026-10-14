@@ -1,5 +1,8 @@
 # llms logs
 logs/
+*.csv
+reproduce_scripts/
+outputs/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

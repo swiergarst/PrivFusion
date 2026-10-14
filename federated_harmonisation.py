@@ -4,30 +4,39 @@ import pandas as pd
 
 logging.basicConfig(level=logging.INFO)
 
-
 from privfusion.agents.llms import WillmaLLM
 from privfusion.consolidater import Consolidator
 from privfusion.dataset_analyzer import DatasetAnalyzer
 
-dataset1 = pd.read_csv("data/covid_global.csv")
-dataset2 = pd.read_csv("data/covid_indonesia.csv")
+# dataset1 = pd.read_csv("data/covid_global.csv")
+# dataset2 = pd.read_csv("data/covid_indonesia.csv")
+
+harmLogger = logging.getLogger("fedHarmonizationLogger")
 
 
-print(dataset1.head())
-print(dataset2.head())
+new_dataset1 = pd.read_csv("outputs/covid_global_modified.csv")
+new_dataset2 = pd.read_csv("outputs/covid_indonesia_modified.csv")
 
-llm = WillmaLLM(model_name="openai/gpt-oss-120b")
+# print(dataset1.head())
+# print(dataset2.head())
+
+llm = WillmaLLM(model_name="openai/gpt-oss-120b", logger=harmLogger)
 analyzer = DatasetAnalyzer(llm)
 
 
 print("analysing datasets..")
 
-dataset1_info = analyzer.extract_information_from_dataset("covid-global", dataset1)
-dataset2_info = analyzer.extract_information_from_dataset("covid-indonesia", dataset2)
+dataset1_info = analyzer.extract_information_from_dataset("covid-global", new_dataset1)
+dataset2_info = analyzer.extract_information_from_dataset("covid-indonesia", new_dataset2)
+
+# datasets = {
+#     "covid-global": {"data": dataset1, "info": dataset1_info},
+#     "covid-indonesia": {"data": dataset2, "info": dataset2_info},
+# }
 
 datasets = {
-    "covid-global": {"data": dataset1, "info": dataset1_info},
-    "covid-indonesia": {"data": dataset2, "info": dataset2_info},
+    "covid-global": {"data": new_dataset1, "info": dataset1_info},
+    "covid-indonesia": {"data": new_dataset2, "info": dataset2_info},
 }
 
 
@@ -50,7 +59,7 @@ result = consolidator.consolidate(datasets, llm)
 # View results
 print(result[["dataset", "feature_name", "cluster_id", "norm_feature_name"]])
 
-result.to_csv("quickstart_result.csv", index=False)
+result.to_csv("quickstart_result_modified.csv", index=False)
 # print(dataset1_info)
 
 

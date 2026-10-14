@@ -36,7 +36,6 @@ import logging
 import os
 import re
 import textwrap
-import time
 import traceback
 from contextlib import redirect_stdout
 from dataclasses import dataclass, field
@@ -50,12 +49,6 @@ from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 
 fileLogger = logging.getLogger("localModifLogger")
-fileLogger.setLevel(logging.INFO)
-fileLogger.propagate = False
-
-handler = logging.FileHandler(f"logs/local_modif_logs_{time.time()}.log")
-handler.setFormatter(logging.Formatter("%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
-fileLogger.addHandler(handler)
 
 # console_handler = logging.StreamHandler()
 # console_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S'))
@@ -64,35 +57,35 @@ fileLogger.addHandler(handler)
 # --------------------------------------------------------------------------- #
 # Config
 # --------------------------------------------------------------------------- #
-MODEL = "anthropic:claude-sonnet-5-5"  # any provider supported by init_chat_model
 RECURSION_LIMIT = 40  # hard cap on agent steps (model + tool calls)
 MAX_TOOL_OUTPUT_CHARS = 4000
 OUTPUT_DIR = Path("outputs")
 
 SYSTEM_PROMPT = """\
 You are a careful data-wrangling agent. You modify CSV data held in pandas
-DataFrames according to the user's instruction.
+DataFrames according to the user's instructions. These are submitted in the user prompt as a table,
+where each row denotes the instruction for one column of the original data.
 
-All DataFrames live in a dict called `dfs`, keyed by name (the CSV file stem).
-Reference tables (loaded from the web, see below) live in a dict called `refs`;
-treat them as read-only. In code you write, `pd`, `np`, `dfs` and `refs` are
-already available. Do not import anything except from the standard library.
+The CSV data lives in a DataFrame called `df`.
+In code you write, `pd`, `np`, `df` and `refs` are already available.
+Do not import anything except from the standard library.
 Never read or write files and never access the network from code.
 
 Workflow:
-1. Call `list_dataframes`, then `inspect_dataframe` on the relevant frames.
+1. Call `inspect_dataframe` on the relevant frame.
 2. If the task needs outside knowledge (code lists, standards, mappings between
    standards, lookup values), do NOT rely on memory. Use `search_web` to find
-   authoritative or well-maintained sources. You can then reference the information
-   found in your transformations. Only for very small mappings may you write the
-   values directly into your code.
-3. Use `explore` to check assumptions BEFORE changing anything: value formats,
+   authoritative or well-maintained sources.
+3. If `search_web` does not give you satisfying results, you can reuse the tool up to
+   5 times with different queries. If there are then still no satisfying results, skip the instruction
+   and report in your summary that you couldn't find the necessary data given the instruction.
+4. Use `explore` to check assumptions BEFORE changing anything: value formats,
    whitespace/case, unique values, missing values, which values of the data have
    no match in the reference table, and whether the reference key is unique.
-4. Make changes with `apply_transformation`, in small, focused steps, each with
+5. Make changes with `apply_transformation`, in small, focused steps, each with
    a short description. Inspect the result after each step to verify it. If a
    step was wrong, use `undo_last_transformation`.
-5. When the instruction is fully satisfied, stop calling tools and reply with a
+6. When the instruction is fully satisfied, stop calling tools and reply with a
    short summary: what you changed, which source(s) you used (URLs), and any
    values that could not be mapped.
 
@@ -115,10 +108,6 @@ Rules:
 # --------------------------------------------------------------------------- #
 
 
-def load_csvs(paths: list[Path]) -> dict[str, pd.DataFrame]:
-    return {re.sub(r"\W+", "_", p.stem): pd.read_csv(p) for p in paths}
-
-
 def strip_fences(code: str) -> str:
     code = code.strip()
     code = re.sub(r"^```(?:python)?\s*", "", code)
@@ -132,15 +121,15 @@ def truncate(text: str, limit: int = MAX_TOOL_OUTPUT_CHARS) -> str:
     return text[:limit] + f"\n... [truncated {len(text) - limit} chars]"
 
 
-def exec_on(dfs: dict[str, pd.DataFrame], code: str) -> tuple[dict[str, pd.DataFrame], str]:
-    """Run code against `dfs` (mutates the dict passed in). Returns (dfs, stdout)."""
-    namespace = {"pd": pd, "np": np, "dfs": dfs}
+def exec_on(df: pd.DataFrame, code: str) -> tuple[dict[str, pd.DataFrame], str]:
+    """Run code against `df` (mutates the dataframe passed in). Returns (ds, stdout)."""
+    namespace = {"pd": pd, "np": np, "df": df}
     out = io.StringIO()
     with redirect_stdout(out):
         exec(code, namespace)  # noqa: S102  (see warning at top of file)
-    result = namespace["dfs"]
-    if not isinstance(result, dict) or not all(isinstance(v, pd.DataFrame) for v in result.values()):
-        raise TypeError("`dfs` must remain a dict of pandas DataFrames.")
+    result = namespace["df"]
+    if not isinstance(result, pd.DataFrame):
+        raise TypeError("`df` must remain a pandas DataFrames.")
     return result, out.getvalue()
 
 
@@ -210,6 +199,35 @@ def _format_messages_for_logging(messages) -> str:
     return "\n".join(lines)
 
 
+def _log_request_size(system_prompt: str, tools: list, user_msg: str, label: str = "initial") -> None:
+    """Log the approximate size of the LLM request payload."""
+    sp_size = len(system_prompt)
+
+    # Estimate tool definition size (name + description + schema)
+    tool_sizes = []
+    for _tool in tools:
+        tool_info = f"{_tool.name}: {_tool.description}"
+        # Add argument schema size
+        if hasattr(_tool, "args_schema") and _tool.args_schema:
+            tool_info += f" args={_tool.args_schema.model_json_schema()}"
+        tool_sizes.append(len(tool_info))
+
+    tools_total = sum(tool_sizes)
+    user_size = len(user_msg)
+    total = sp_size + tools_total + user_size
+
+    fileLogger.info(
+        f"[{label} request size] "
+        f"system_prompt={sp_size} chars, "
+        f"tools={len(tools)} ({tools_total} chars), "
+        f"user_msg={user_size} chars, "
+        f"TOTAL ≈ {total} chars"
+    )
+    # Log individual tool sizes at debug level
+    for i, (_tool, size) in enumerate(zip(tools, tool_sizes, strict=False)):
+        fileLogger.debug(f"  tool[{i}] {_tool.name}: {size} chars")
+
+
 # --------------------------------------------------------------------------- #
 # Session state shared by all tools
 # --------------------------------------------------------------------------- #
@@ -221,9 +239,9 @@ class Step:
 
 @dataclass
 class Session:
-    input_paths: list[Path]
-    original: dict[str, pd.DataFrame]
-    working: dict[str, pd.DataFrame] = field(default_factory=dict)
+    input_path: Path
+    original: pd.DataFrame
+    working: pd.DataFrame = field(default_factory=pd.DataFrame)
     steps: list[Step] = field(default_factory=list)
     # snapshots[i] = state *before* step i, enabling undo
     snapshots: list[dict[str, pd.DataFrame]] = field(default_factory=list)
@@ -236,84 +254,13 @@ def build_tools(session: Session) -> list:
     """Create tools bound to a session (closures keep the state out of the LLM's hands)."""
 
     @tool
-    def search_web(query: str) -> str:
-        """Searches the web for information.
-
-        Args:
-            query: search query to use for web search
-
-        Returns:
-            Formatted search results with titles, URLs, and snippets
-        """
-        fileLogger.info(
-            f"tool call: search_web(query='{query[:100]}...')"
-            if len(query) > 100
-            else f"tool call: search_web(query='{query}')"
-        )
-        try:
-            from urllib.parse import quote_plus
-
-            import requests
-
-            # Using DuckDuckGo HTML search (no API key required)
-            search_url = f"https://html.duckduckgo.com/html/?q={quote_plus(query)}"
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-            }
-            response = requests.get(search_url, headers=headers, timeout=10)
-            response.raise_for_status()
-
-            from bs4 import BeautifulSoup
-
-            soup = BeautifulSoup(response.text, "html.parser")
-
-            results = []
-            for result in soup.find_all("a", class_="result__a")[:10]:
-                title = result.get_text(strip=True)
-                href = result.get("href", "")
-                # Extract the actual URL from DuckDuckGo redirect
-                snippet_elem = result.find_parent("a").find_next_sibling() if result.find_parent("a") else None
-                snippet = snippet_elem.get_text(strip=True) if snippet_elem else ""
-                results.append(f"Title: {title}\nURL: {href}\nSnippet: {snippet}\n")
-
-            if not results:
-                fileLogger.info("tool result: search_web -> No search results found.")
-                return "No search results found."
-
-            result_str = "\n".join(results)
-            fileLogger.info(
-                f"tool result: search_web -> {result_str[:300]}..."
-                if len(result_str) > 300
-                else f"tool result: search_web -> {result_str}"
-            )
-            return result_str
-        except Exception as e:
-            error_msg = f"Search error: {str(e)}"
-            fileLogger.info(f"tool result: search_web -> ERROR: {error_msg}")
-            return error_msg
-
-    @tool
-    def list_dataframes() -> str:
-        """List the currently loaded DataFrames with their shapes (reflects all committed changes)."""
-        fileLogger.info("tool call: list_dataframes()")
-        result = "\n".join(f"dfs[{n!r}]: shape={df.shape}" for n, df in session.working.items())
-        fileLogger.info(f"tool result: list_dataframes -> {result}")
-        return result
-
-    @tool
-    def inspect_dataframe(name: str, n_rows: int = 5) -> str:
+    def inspect_dataframe(n_rows: int = 5) -> str:
         """Show schema, null counts, sample rows and summary statistics for one DataFrame.
 
         Args:
-            name: key in `dfs` (the CSV file stem).
             n_rows: number of sample rows to show (max 50).
         """
-        fileLogger.info(f"tool call: inspect_dataframe(name='{name}', n_rows={n_rows})")
-        if name not in session.working:
-            error_msg = f"ERROR: no DataFrame named {name!r}. Available: {list(session.working)}"
-            fileLogger.info(f"tool result: inspect_dataframe -> {error_msg}")
-            return error_msg
-        df = session.working[name]
+        df = session.working
         n_rows = max(1, min(int(n_rows), 50))
         info = io.StringIO()
         df.info(buf=info)
@@ -337,12 +284,12 @@ def build_tools(session: Session) -> list:
     def explore(code: str) -> str:
         """Run READ-ONLY pandas code to investigate the data. Nothing is saved.
 
-        The code runs on a throwaway copy of `dfs`, so any modifications are
+        The code runs on a throwaway copy of `df`, so any modifications are
         discarded. Use print() to see results. Use this to test assumptions
         before calling apply_transformation.
 
         Args:
-            code: Python code using `dfs`, `pd`, `np`.
+            code: Python code using `df`, `pd`, `np`.
         """
         code_preview = code[:100].replace("\n", " ") + "..." if len(code) > 100 else code.replace("\n", " ")
         fileLogger.info(f"tool call: explore(code='{code_preview}')")
@@ -369,7 +316,7 @@ def build_tools(session: Session) -> list:
 
         Args:
             description: one short sentence describing this step.
-            code: Python code that modifies the `dfs` dict in place or reassigns entries.
+            code: Python code that modifies the `df` dict in place or reassigns entries.
         """
         code_preview = code[:100].replace("\n", " ") + "..." if len(code) > 100 else code.replace("\n", " ")
         fileLogger.info(f"tool call: apply_transformation(description='{description}', code='{code_preview}')")
@@ -386,8 +333,8 @@ def build_tools(session: Session) -> list:
         session.working = candidate
         session.steps.append(Step(description=description, code=code))
 
-        shapes = ", ".join(f"{n}: {df.shape}" for n, df in session.working.items())
-        msg = f"OK. Committed step {len(session.steps)}. Shapes now -> {shapes}"
+        shape = session.working.shape
+        msg = f"OK. Committed step {len(session.steps)}. Shapes now -> {shape}"
         if out.strip():
             msg += f"\nstdout:\n{truncate(out, 1500)}"
         fileLogger.info(
@@ -411,7 +358,65 @@ def build_tools(session: Session) -> list:
         fileLogger.info(f"tool result: undo_last_transformation -> {result}")
         return result
 
-    return [search_web, list_dataframes, inspect_dataframe, explore, apply_transformation, undo_last_transformation]
+    @tool
+    def search_web(query: str, categories: str = "general") -> str:
+        """Search the web using local SearXNG instance.
+
+        Args:
+            query: search query
+            categories: search category (general, news, images, videos, it, science, files, music, maps, social media)
+
+        Returns:
+            Formatted search results with titles, URLs, and snippets
+        """
+        fileLogger.info(
+            f"tool call: search_web_searxng(query='{query[:100]}...', categories='{categories}')"
+            if len(query) > 100
+            else f"tool call: search_web_searxng(query='{query}', categories='{categories}')"
+        )
+        try:
+            import requests
+
+            # Using local SearXNG instance
+            search_url = "http://localhost:8080/search"
+            params = {"q": query, "format": "json", "categories": categories}
+            fileLogger.debug(f"search_web_searxng: URL={search_url}, params={params}")
+            response = requests.get(search_url, params=params, timeout=10)
+            fileLogger.debug(
+                f"search_web_searxng: status_code={response.status_code}, response_length={len(response.text)}"
+            )
+            fileLogger.debug(f"Raw results: {response.text}")
+            response.raise_for_status()
+
+            data = response.json()
+            results = []
+            result_count = len(data.get("results", []))
+            fileLogger.debug(f"search_web_searxng: found {result_count} results")
+
+            for result in data.get("results", [])[:10]:
+                title = result.get("title", "")
+                url = result.get("url", "")
+                content = result.get("content", "")
+                results.append(f"Title: {title}\nURL: {url}\nSnippet: {content}\n")
+
+            if not results:
+                fileLogger.info("tool result: search_web_searxng -> No search results found.")
+                return "No search results found."
+
+            result_str = "\n".join(results)
+            fileLogger.info(
+                f"tool result: search_web_searxng -> {result_str[:300]}..."
+                if len(result_str) > 300
+                else f"tool result: search_web_searxng -> {result_str}"
+            )
+            return result_str
+        except Exception as e:
+            error_msg = f"Search error: {str(e)}"
+            fileLogger.info(f"tool result: search_web_searxng -> ERROR: {error_msg}")
+            return error_msg
+
+    # return [search_web,
+    return [search_web, inspect_dataframe, explore, apply_transformation, undo_last_transformation]
 
 
 # --------------------------------------------------------------------------- #
@@ -419,12 +424,12 @@ def build_tools(session: Session) -> list:
 # --------------------------------------------------------------------------- #
 def build_repro_script(
     steps: list[Step],
-    input_paths: list[Path],
-    output_paths: dict[str, Path],
+    input_path: Path,
+    output_path: Path,
     instruction: str,
 ) -> str:
-    inputs = ",\n    ".join(repr(str(p)) for p in input_paths)
-    outputs = ",\n    ".join(f"{k!r}: {str(v)!r}" for k, v in output_paths.items())
+    input = input_path
+    output = output_path
 
     step_blocks = []
     for i, s in enumerate(steps, 1):
@@ -440,15 +445,15 @@ def build_repro_script(
         "from pathlib import Path\n\n"
         "import numpy as np\n"
         "import pandas as pd\n\n"
-        f"INPUT_PATHS = [\n    {inputs},\n]\n\n"
-        f"OUTPUT_PATHS = {{\n    {outputs},\n}}\n\n"
+        f"INPUT_PATH = [\n    {input},\n]\n\n"
+        f"OUTPUT_PATH = {{\n    {output},\n}}\n\n"
         "# --- Load ---------------------------------------------------------------\n"
-        'dfs = {re.sub(r"\\W+", "_", Path(p).stem): pd.read_csv(p) for p in INPUT_PATHS}\n\n'
+        'dfs = {re.sub(r"\\W+", "_", Path(p).stem): pd.read_csv(p) for p in INPUT_PATH}\n\n'
         "# --- Transform (agent-generated) ----------------------------------------\n"
         f"{transform}\n"
         "# --- Save ---------------------------------------------------------------\n"
         "for name, df in dfs.items():\n"
-        '    out = Path(OUTPUT_PATHS.get(name, f"{name}_modified.csv"))\n'
+        '    out = f"{OUTPUT_PATH}_modified.csv"))\n'
         "    out.parent.mkdir(parents=True, exist_ok=True)\n"
         "    df.to_csv(out, index=False)\n"
         '    print(f"Wrote {out}  shape={df.shape}")\n'
@@ -480,8 +485,8 @@ class AgentResult:
     success: bool
     summary: str = ""
     steps: list[Step] = field(default_factory=list)
-    output_csvs: dict[str, Path] = field(default_factory=dict)
-    script_path: Path | None = None
+    output_csv: pd.DataFrame = field(default_factory=dict)
+    script: str | None = None
     replay_ok: bool | None = None
     replay_message: str = ""
     error: str | None = None
@@ -500,10 +505,9 @@ class CSVAgent:
         self.output_dir = output_dir
         self.recursion_limit = recursion_limit
 
-    def run(self, csv_paths: list[str | Path], instruction: str) -> AgentResult:
-        input_paths = [Path(p) for p in csv_paths]
-        original = load_csvs(input_paths)
-        session = Session(input_paths=input_paths, original=original)
+    def run(self, name: str, csv_path: str, instruction: str) -> AgentResult:
+        original = pd.read_csv(csv_path)
+        session = Session(input_path=csv_path, original=original)
 
         load_dotenv()
 
@@ -512,17 +516,24 @@ class CSVAgent:
             model=os.environ.get("LLM_MODEL"),
             openai_api_key=os.environ.get("WILLMA_API_KEY"),
             openai_api_base=os.environ.get("WILLMA_BASE_URL"),
+            streaming=True,
         )
         agent = create_agent(
             model=llm,
             tools=build_tools(session),
             system_prompt=SYSTEM_PROMPT,
         )
-
-        names = ", ".join(f"{n!r} {df.shape}" for n, df in original.items())
-        user_msg = f"Loaded DataFrames: {names}\n\nInstruction:\n{instruction}"
+        instr_text = instruction.drop(columns="dataset").to_csv(index=False)
+        user_msg = (
+            f"Columns/dtypes:\n{original.dtypes.to_string()}\n\n"
+            f"Sample rows:\n{original.head(5).to_csv(index=False)}\n\n"
+            f"Instructions (one row per column):\n{instr_text}"
+        )
 
         try:
+            _log_request_size(
+                system_prompt=SYSTEM_PROMPT, tools=build_tools(session), user_msg=user_msg, label="initial"
+            )
             fileLogger.info(f">>> LLM REQUEST <<<\n{user_msg}")
             state = agent.invoke(
                 {"messages": [{"role": "user", "content": user_msg}]},
@@ -531,6 +542,9 @@ class CSVAgent:
             fileLogger.info(f'>>> LLM RESPONSE <<<\n{_format_messages_for_logging(state["messages"])}')
             fileLogger.info("--------------------------------------------------------------")
             summary = _message_text(state["messages"][-1])
+
+        # except GraphRecursionError as e:
+        #     pass
         except Exception as e:  # includes GraphRecursionError
             return AgentResult(success=False, steps=session.steps, error=f"{type(e).__name__}: {e}")
 
@@ -538,22 +552,21 @@ class CSVAgent:
         replay_ok, replay_msg = replay(session)
 
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        output_csvs = {}
-        for name, df in session.working.items():
-            out = self.output_dir / f"{name}_modified.csv"
-            df.to_csv(out, index=False)
-            output_csvs[name] = out
+        output_csv = session.working
+        # out_df =
+        output_path = self.output_dir / f"{name}_modified.csv"
+        # output_csv.to_csv(output_path, index=False)
 
-        script = build_repro_script(session.steps, input_paths, output_csvs, instruction)
-        script_path = self.output_dir / "reproduce.py"
-        script_path.write_text(script)
+        script = build_repro_script(session.steps, csv_path, output_path, instruction)
+        # script_path = self.output_dir / "reproduce.py"
+        # script_path.write_text(script)
 
         return AgentResult(
             success=True,
             summary=summary,
             steps=session.steps,
-            output_csvs=output_csvs,
-            script_path=script_path,
+            output_csv=output_csv,
+            script=script,
             replay_ok=replay_ok,
             replay_message=replay_msg,
         )
@@ -563,19 +576,12 @@ class CSVAgent:
 # CLI
 # --------------------------------------------------------------------------- #
 def main():
-    # parser = argparse.ArgumentParser(description="Modify CSVs with an agent.")
-    # parser.add_argument("args", nargs="+", help="One or more CSV paths, then the instruction (last arg).")
-    # parsed = parser.parse_args()
+    instruction = pd.read_csv("dataset_modifications/dataset_modifications_2.csv")
 
-    # *csvs, instruction = parsed.args
-    # if not csvs:
-    #     parser.error("Provide at least one CSV path and an instruction.")
-
-    csvs = ["datasets/covid_global.csv"]
-    instruction = pd.read_csv("dataset_modifications/dataset_modifications.csv")
-
-    instruction = instruction.loc[instruction["dataset"] == "covid-global"]
-    result = CSVAgent().run(csvs, instruction)
+    input_path = "datasets/covid_indonesia.csv"
+    dataset = pd.read_csv(input_path)
+    instruction = instruction.loc[instruction["dataset"] == "covid-indonesia"]
+    result = CSVAgent().run("covid-indonesia", dataset, instruction)
 
     if not result.success:
         print(f"Agent failed: {result.error}")

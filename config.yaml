@@ -1,0 +1,9 @@
+rounds: 3
+dataset_config:
+    - name: "covid19-global"
+      path: "datasets/covid_global.csv"
+    - name: "covid19-indonesia"
+      path: "datasets/covid_indonesia.csv"
+save_intermediate: true
+dataset_checkpoints_path: "./dataset_checkpoints"
+script_path: "./reproduce_scripts"

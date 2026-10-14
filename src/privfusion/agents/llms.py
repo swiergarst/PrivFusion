@@ -1,7 +1,6 @@
 import json
 import logging
 import os
-import time
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -13,15 +12,15 @@ from langchain_ollama import ChatOllama
 from litellm import completion
 from litellm.exceptions import NotFoundError, RateLimitError, Timeout
 
-logger = logging.getLogger(__name__)
-
 # setup a separate logger that logs all input and output to and from the LLM
-llmLogger = logging.getLogger("llmLogger")
-llmLogger.setLevel(logging.INFO)
-llmLogger.propagate = False
+llmLogger = logging.getLogger("fedHarmonizationLogger")
 
-handler = logging.FileHandler(f"logs/llm_logs_{time.time()}.log")
-llmLogger.addHandler(handler)
+# llmLogger = logging.getLogger("llmLogger")
+# llmLogger.setLevel(logging.INFO)
+# llmLogger.propagate = False
+
+# handler = logging.FileHandler(f"logs/llm_logs_{time.time()}.log")
+# llmLogger.addHandler(handler)
 
 
 class LLM(ABC):
@@ -212,24 +211,29 @@ class WillmaLLM(LLM):
         headers = {"X-API-KEY": self.api_key, "Content-Type": "application/json"}  # Define python requests headers.
 
         result: dict[str, str] = {}
-        _messages = [{"role": message.type, "content": message.content} for message in messages]
+        # _messages = [{"role": message.type, "content": message.content} for message in messages]
+
+        # TODO: SystemMessage should be serializable but it isn't, so this is a workaround
+        _messages = []
+        for message in messages:
+            new_message = {"role": message.type, "content": message.content}
+            # workaround for mismatch between langchain and willma
+            if new_message["role"] == "human":
+                new_message["role"] = "user"
+            _messages.append(new_message)
 
         llmLogger.info(f"input messages: {_messages}")
-        try:
-            # TODO: SystemMessage should be serializable but it isn't, so this is a workaround
-            _messages = [{"role": message.type, "content": message.content} for message in messages]
-            response = requests.post(
-                f"{willma_base_url}/chat/completions",
-                data=json.dumps({"model": self.model_name, "messages": _messages}),
-                headers=headers,
-                timeout=42,
-            ).json()
-            # TODO: configure logging with logging levels (@claude probably)
-            # print(response)
-            if "error" in response:
-                raise ValueError(f'error from willma: {response['message']}, full response: {response}')
-            llmLogger.info(f"response: {response}")
 
+        response = requests.post(
+            f"{willma_base_url}/chat/completions",
+            data=json.dumps({"model": self.model_name, "messages": _messages}),
+            headers=headers,
+            timeout=42,
+        ).json()
+        if "error" in response:
+            raise ValueError(f"error from willma, full response: {response}")
+        llmLogger.info(f"response: {response}")
+        try:
             result["response"] = response["choices"][0]["message"]["content"]
             result["reason"] = (
                 ""  # TODO: see if we can implement reasoning for willma (need to verify if the model has reasoning)
