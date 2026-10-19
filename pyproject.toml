@@ -55,6 +55,7 @@ dev = [
     "pytest-cov",
     "pytest",
     "ruff",
+    "streamlit",
     "ty",
     "bandit",
     "notebook==7.5.6",

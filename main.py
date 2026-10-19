@@ -89,7 +89,8 @@ def main(config_path: str = "config.yaml"):
             local_result = agent.run(dataset_name, dataset_path, instructions)
             if config["save_intermediate"]:
                 with open(f"logs/local_results_{dataset_name}_round_{round}_id_{run_id}.json", "w") as fp:
-                    json.dump(asdict(local_result), fp)
+                    # output_csv is the modified DataFrame (written as checkpoint); not JSON-serializable
+                    json.dump({k: v for k, v in asdict(local_result).items() if k != "output_csv"}, fp, indent=2)
 
             if not local_result.success:
                 consoleLogger.error(f"Agent failed: {local_result.error}")

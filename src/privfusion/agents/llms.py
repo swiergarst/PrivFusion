@@ -228,7 +228,7 @@ class WillmaLLM(LLM):
             f"{willma_base_url}/chat/completions",
             data=json.dumps({"model": self.model_name, "messages": _messages}),
             headers=headers,
-            timeout=42,
+            timeout=420,
         ).json()
         if "error" in response:
             raise ValueError(f"error from willma, full response: {response}")
