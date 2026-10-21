@@ -21,22 +21,56 @@ FMT = logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s")
 
 
 def federated_harmonization(datasets_in: list, run_id: str, round: int):
+    # llm = WillmaLLM(model_name=os.environ.get("HARM_LLM_MODEL"))
+    # analyzer = DatasetAnalyzer(llm)
+    # datasets = {}
+
+    # for dataset_in in datasets_in:
+    #     dataset_name = dataset_in["name"]
+    #     dataset = pd.read_csv(dataset_in["path"])
+
+    #     consoleLogger.info(f"extracting information from dataset {dataset_name}..")
+    #     dataset_info = analyzer.extract_information_from_dataset(dataset_name, dataset)
+    #     datasets[dataset_name] = {"data": dataset, "info": dataset_info}
+
+    # consolidator = Consolidator()
+    # consoleLogger.info("consolidating..")
+    # result = consolidator.consolidate(datasets, llm)
+    # return result
+
+    dataset_names = []
+    dataset_paths = []
+    for dataset in datasets_in:
+        dataset_names.append(dataset["name"])
+        dataset_paths.append(dataset["path"])
+
+    return central_fn(dataset_names, dataset_paths)
+
+
+# in actual application, both of these should be env variables (or data path is explicitly set in e.g. v6)
+def local_client_fn(dataset_name: str, data_path: str) -> dict:
     llm = WillmaLLM(model_name=os.environ.get("HARM_LLM_MODEL"))
     analyzer = DatasetAnalyzer(llm)
-    datasets = {}
+    dataset = pd.read_csv(data_path)
+    consoleLogger.info(f"extracting information from dataset {dataset_name}..")
+    dataset_info = analyzer.extract_information_from_dataset(dataset_name, dataset)
 
-    for dataset_in in datasets_in:
-        dataset_name = dataset_in["name"]
-        dataset = pd.read_csv(dataset_in["path"])
+    return {"dataset_name": dataset_name, "info": dataset_info}
 
-        consoleLogger.info(f"extracting information from dataset {dataset_name}..")
-        dataset_info = analyzer.extract_information_from_dataset(dataset_name, dataset)
-        datasets[dataset_name] = {"data": dataset, "info": dataset_info}
 
+# see local fn: these should both disappear in actual application
+def central_fn(dataset_names: list, dataset_paths: list):
+    round_results = {}
+    for dataset_name, dataset_path in zip(dataset_names, dataset_paths, strict=False):
+        client_result = local_client_fn(dataset_name, dataset_path)
+        round_results[client_result["dataset_name"]] = client_result
+
+    llm = WillmaLLM(model_name=os.environ.get("HARM_LLM_MODEL"))
     consolidator = Consolidator()
     consoleLogger.info("consolidating..")
-    result = consolidator.consolidate(datasets, llm)
-    return result
+    consoliator_result = consolidator.consolidate(round_results, llm)
+
+    return consoliator_result
 
 
 def set_round_handler(logger_name: str, filename: str) -> None:
