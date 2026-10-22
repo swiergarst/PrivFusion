@@ -9,6 +9,8 @@ from pathlib import Path
 import pandas as pd
 import yaml
 from dotenv import load_dotenv
+from sdv.metadata import Metadata
+from sdv.single_table import GaussianCopulaSynthesizer
 from tqdm import tqdm
 
 from local_modifications import CSVAgent
@@ -52,18 +54,26 @@ def local_client_fn(dataset_name: str, data_path: str) -> dict:
     llm = WillmaLLM(model_name=os.environ.get("HARM_LLM_MODEL"))
     analyzer = DatasetAnalyzer(llm)
     dataset = pd.read_csv(data_path)
+
     consoleLogger.info(f"extracting information from dataset {dataset_name}..")
     dataset_info = analyzer.extract_information_from_dataset(dataset_name, dataset)
 
-    return {"dataset_name": dataset_name, "info": dataset_info}
+    consoleLogger.info(f"creating synthetic data for dataset {dataset_name}..")
+    metadata = Metadata.detect_from_dataframes(data={dataset_name: dataset})
+    synth = GaussianCopulaSynthesizer(metadata)
+    synth.fit({dataset_name: dataset})
+
+    synthetic_df = synth.sample(num_rows=5)[dataset_name]
+
+    return dataset_name, {"data": synthetic_df, "info": dataset_info}
 
 
 # see local fn: these should both disappear in actual application
 def central_fn(dataset_names: list, dataset_paths: list):
     round_results = {}
     for dataset_name, dataset_path in zip(dataset_names, dataset_paths, strict=False):
-        client_result = local_client_fn(dataset_name, dataset_path)
-        round_results[client_result["dataset_name"]] = client_result
+        client_name, client_result = local_client_fn(dataset_name, dataset_path)
+        round_results[client_name] = client_result
 
     llm = WillmaLLM(model_name=os.environ.get("HARM_LLM_MODEL"))
     consolidator = Consolidator()
