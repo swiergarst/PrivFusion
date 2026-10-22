@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import time
+import warnings
 from dataclasses import asdict
 from pathlib import Path
 
@@ -20,6 +21,10 @@ from privfusion.dataset_analyzer import DatasetAnalyzer
 from setup_logging import consoleLogger
 
 FMT = logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s")
+
+
+# class stopwatch():
+#     def __init__(self):
 
 
 def federated_harmonization(datasets_in: list, run_id: str, round: int):
@@ -59,11 +64,22 @@ def local_client_fn(dataset_name: str, data_path: str) -> dict:
     dataset_info = analyzer.extract_information_from_dataset(dataset_name, dataset)
 
     consoleLogger.info(f"creating synthetic data for dataset {dataset_name}..")
-    metadata = Metadata.detect_from_dataframes(data={dataset_name: dataset})
-    synth = GaussianCopulaSynthesizer(metadata)
-    synth.fit({dataset_name: dataset})
 
-    synthetic_df = synth.sample(num_rows=5)[dataset_name]
+    synthetic_df = pd.DataFrame()
+    num_rows = 5
+    for column in dataset.columns:
+        # print(dataset[[column]].shape)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UserWarning)
+            col_df = dataset[[column]]
+            if col_df.isna().sum().sum() == col_df.shape[0]:  # column has only NaN's
+                synthetic_df[column] = col_df.loc[:num_rows]
+                continue
+            metadata = Metadata.detect_from_dataframes(data={column: dataset[[column]].dropna()})
+            synth = GaussianCopulaSynthesizer(metadata)
+            synth.fit({column: dataset[[column]].dropna()})
+            synthetic_column = synth.sample(num_rows=num_rows)[column]
+            synthetic_df[column] = synthetic_column
 
     return dataset_name, {"data": synthetic_df, "info": dataset_info}
 

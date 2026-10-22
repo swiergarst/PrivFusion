@@ -47,6 +47,7 @@ from dotenv import load_dotenv
 from langchain.agents import create_agent
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
+from langgraph.errors import GraphRecursionError
 
 fileLogger = logging.getLogger("localModifLogger")
 
@@ -536,16 +537,18 @@ class CSVAgent:
                 system_prompt=SYSTEM_PROMPT, tools=build_tools(session), user_msg=user_msg, label="initial"
             )
             fileLogger.info(f">>> LLM REQUEST <<<\n{user_msg}")
-            state = agent.invoke(
-                {"messages": [{"role": "user", "content": user_msg}]},
-                config={"recursion_limit": self.recursion_limit},
-            )
+            try:
+                state = agent.invoke(
+                    {"messages": [{"role": "user", "content": user_msg}]},
+                    config={"recursion_limit": self.recursion_limit},
+                )
+            except GraphRecursionError:
+                fileLogger.warning("Hit graphRecursionLimit, returning with current state..")
+
             fileLogger.info(f'>>> LLM RESPONSE <<<\n{_format_messages_for_logging(state["messages"])}')
             fileLogger.info("--------------------------------------------------------------")
             summary = _message_text(state["messages"][-1])
 
-        # except GraphRecursionError as e:
-        #     pass
         except Exception as e:  # includes GraphRecursionError
             return AgentResult(success=False, steps=session.steps, error=f"{type(e).__name__}: {e}")
 
