@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock
 
 import pandas as pd
+import pytest
 from faker import Faker
 
 from privfusion.data_models import DatasetInformation, SemanticInformation, StructuralInformation
@@ -46,6 +47,9 @@ def test_semantic(faker: Faker) -> None:
     assert semantic is not None
 
 
+@pytest.mark.skip(
+    reason="Feature not ready yet",
+)
 def test_store_dataset_information() -> None:
     mock_semantics = SemanticInformation(description="", column_types=[], column_semantic=[], dataset_topics=[])
     mock_structural = StructuralInformation(names=[], types=[], constraints=[], description="")

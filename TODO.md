@@ -1,0 +1,8 @@
+- change sandbox environment
+- continue from checkpoints in case things crash
+    - change run ID's to be more manageable
+- fix recursion error
+    - try/except to continue run if we hit it
+    - change prompt to be more specific (no 'do x or y')
+- make code faster (verify its not just willma)
+- fix inspect_dataframe not showing up in dashboard (opencode)

@@ -260,6 +260,7 @@ def build_tools(session: Session) -> list:
         Args:
             n_rows: number of sample rows to show (max 50).
         """
+        fileLogger.info(f"tool call: inspect_dataframe(n_rows={n_rows})")
         df = session.working
         n_rows = max(1, min(int(n_rows), 50))
         info = io.StringIO()
