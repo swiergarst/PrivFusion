@@ -1,6 +1,8 @@
 import json
 import logging
 import os
+import random
+import time
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -200,17 +202,18 @@ class OllamaLLM(LLM):
 
 
 class WillmaLLM(LLM):
-    def __init__(self, model_name: str):
+    def __init__(self, model_name: str, max_retries: int = 3, timeout: float = 120.0):
         self.model_name = model_name
         self.api_key = os.getenv("WILLMA_API_KEY", None)
         if self.api_key is None:
             raise OSError("WILLMA API key not found in environment.")
+        self._max_retries = max_retries
+        self._timeout = timeout
 
     def chat(self, messages: list[Any], **kwargs: Any) -> dict[str, str]:
         willma_base_url = "https://api.willma.surf.nl/v0"
         headers = {"X-API-KEY": self.api_key, "Content-Type": "application/json"}  # Define python requests headers.
 
-        result: dict[str, str] = {}
         # _messages = [{"role": message.type, "content": message.content} for message in messages]
 
         # TODO: SystemMessage should be serializable but it isn't, so this is a workaround
@@ -222,25 +225,71 @@ class WillmaLLM(LLM):
                 new_message["role"] = "user"
             _messages.append(new_message)
 
+        payload: dict[str, Any] = {"model": self.model_name, "messages": _messages}
+        if kwargs.get("response_format"):
+            payload["response_format"] = kwargs["response_format"]
+
         llmLogger.info(f"input messages: {_messages}")
 
-        response = requests.post(
-            f"{willma_base_url}/chat/completions",
-            data=json.dumps({"model": self.model_name, "messages": _messages}),
-            headers=headers,
-            timeout=420,
-        ).json()
-        if "error" in response:
-            raise ValueError(f"error from willma, full response: {response}")
-        llmLogger.info(f"response: {response}")
-        try:
-            result["response"] = response["choices"][0]["message"]["content"]
-            result["reason"] = (
-                ""  # TODO: see if we can implement reasoning for willma (need to verify if the model has reasoning)
-            )
-        except Exception as e:
-            llmLogger.error(">>>> EXCEPTION:")
-            llmLogger.error(e)
+        last_error: Exception | None = None
+        for attempt in range(1, self._max_retries + 1):
+            started = time.time()
+            try:
+                response_obj = requests.post(
+                    f"{willma_base_url}/chat/completions",
+                    data=json.dumps(payload),
+                    headers=headers,
+                    timeout=self._timeout,
+                )
+                if response_obj.status_code >= 500:
+                    raise requests.HTTPError(f"HTTP {response_obj.status_code} from willma")
+                response = response_obj.json()
+            except (requests.RequestException, ValueError) as e:
+                last_error = e
+                if attempt < self._max_retries:
+                    delay = 2.0**attempt + random.uniform(0, 1)
+                    llmLogger.warning(
+                        f"willma request failed (attempt {attempt}/{self._max_retries}): {e}; retrying in {delay:.1f}s"
+                    )
+                    time.sleep(delay)
+                    continue
+                llmLogger.error(f"willma request failed after {self._max_retries} attempts: {e}")
+                raise RuntimeError(f"willma request failed after {self._max_retries} attempts: {e}") from e
 
-        # print(f'response:{result['response']}')
-        return result
+            if "error" in response:
+                last_error = ValueError(f"error from willma, full response: {response}")
+                if attempt < self._max_retries:
+                    delay = 2.0**attempt + random.uniform(0, 1)
+                    llmLogger.warning(
+                        f"willma returned an error (attempt {attempt}/{self._max_retries}); retrying in {delay:.1f}s"
+                    )
+                    time.sleep(delay)
+                    continue
+                llmLogger.error(f"willma returned an error after {self._max_retries} attempts: {response}")
+                raise last_error
+
+            llmLogger.info(f"response: {response}")
+            try:
+                content = response["choices"][0]["message"]["content"]
+            except (KeyError, IndexError, TypeError) as e:
+                last_error = ValueError(f"no content in willma response: {response}")
+                if attempt < self._max_retries:
+                    delay = 2.0**attempt + random.uniform(0, 1)
+                    llmLogger.warning(
+                        f"willma response had no content (attempt {attempt}/{self._max_retries}); retrying in {delay:.1f}s"
+                    )
+                    time.sleep(delay)
+                    continue
+                llmLogger.error(f"willma response had no content after {self._max_retries} attempts: {response}")
+                raise last_error from e
+
+            llmLogger.info(f"willma call took {time.time() - started:.1f}s")
+            return {
+                "response": content,
+                "reason": (
+                    ""  # TODO: see if we can implement reasoning for willma (need to verify if the model has reasoning)
+                ),
+            }
+
+        # Unreachable: every attempt either returns, raises, or continues
+        raise last_error if last_error is not None else RuntimeError("willma chat retries exhausted")

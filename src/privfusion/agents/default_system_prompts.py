@@ -1,6 +1,9 @@
 class DatasetAnalyzerPrompts:
     DESCRIPTION_SYSTEM_PROMPT = """I have a tabular dataset contisting of various columns. Given the column names and some examples as per (SAMPLE) describe the overall semantic of the dataset in a formal style. Only return the discorsive description."""
     COLUMN_SEMANTIC_SYSTEM_PROMPT = """Given the description of a dataset (DESCRIPTION), the column type (COLUMN_TYPE) describe the semantic of the column (COLUMN) in a formal style. Only return the discorsive description."""
+    COLUMNS_SEMANTIC_SYSTEM_PROMPT = """Given the description of a dataset (DESCRIPTION), describe the semantic of each of the listed columns. For every column the column name (COLUMN) and its column type (COLUMN_TYPE) are given.
+Describe each column's semantic in a formal, discorsive style.
+Only return a JSON object mapping every column name to its description. No comments, no markdown fences, no other text."""
     TOPICS_SYSTEM_PROMPT = """Given the dataset descripion (DESCRIPTION) and the sample (SAMPLE) list topics of the dataset. Respond with a list of topics one per line only"""
     RELATIONSHIPS_SYSTEM_PROMPT = """Given the dataset in (SAMPLE) highlight relationships between columns in the following format: {column_name} -> {column_name} := {explanation}. Do not provide any comment."""
     STRUCTURE_DESCRIPTION_SYSTEM_PROMPT = """Given a tabular datasets consisting of columns (COLUMN_NAMES) and some examples as per (SAMPLE), please describe the structure of the dataset to the best of your understanding. Only return the discorsive description."""

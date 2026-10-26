@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pandas as pd  # type: ignore
@@ -10,6 +11,16 @@ from privfusion.agents.default_system_prompts import DatasetAnalyzerPrompts
 from privfusion.agents.llms import LLM
 from privfusion.data_models import DatasetInformation, SemanticInformation, SemanticRelationship, StructuralInformation
 from privfusion.utils import get_type_mapping
+
+
+def _strip_code_fences(text: str) -> str:
+    """Remove markdown code fences (```json ... ```) some models wrap JSON in."""
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1] if "\n" in text else ""
+        if text.rstrip().endswith("```"):
+            text = text.rstrip()[:-3]
+    return text.strip()
 
 
 class DatasetAnalyzer:
@@ -30,6 +41,10 @@ class DatasetAnalyzer:
         self._column_semantic_system_prompt = config.get(
             "column_semantic_system_prompt",
             DatasetAnalyzerPrompts.COLUMN_SEMANTIC_SYSTEM_PROMPT,
+        )
+        self._columns_semantic_system_prompt = config.get(
+            "columns_semantic_system_prompt",
+            DatasetAnalyzerPrompts.COLUMNS_SEMANTIC_SYSTEM_PROMPT,
         )
         self._topics_system_prompt = config.get(
             "topics_system_prompt",
@@ -94,6 +109,48 @@ class DatasetAnalyzer:
         return response["response"]
 
     def _generate_column_semantic(
+        self,
+        dataset: pd.DataFrame,
+        description: str,
+        column_types: list[str | None],
+    ) -> list[str | None]:
+        """Describe the semantic of every column.
+
+        Uses a single batched LLM call (one JSON object mapping column ->
+        description) instead of one call per column. If the batched response
+        cannot be parsed or does not cover all columns, falls back to the
+        original per-column calls.
+        """
+        if len(dataset.columns) == 0:
+            return []
+
+        payload = [
+            {"column": column_name, "type": column_type if column_type is not None else "Unknown"}
+            for column_name, column_type in zip(dataset.columns, column_types, strict=False)
+        ]
+
+        chats: list[BaseMessage] = [
+            SystemMessage(self._columns_semantic_system_prompt),
+            HumanMessage("DESCRIPTION: " + description),
+            HumanMessage("COLUMNS:\n" + json.dumps(payload, indent=2)),
+        ]
+
+        try:
+            response = self._llm.chat(chats)["response"]
+            parsed = json.loads(_strip_code_fences(response))
+            if not isinstance(parsed, dict):
+                raise ValueError("batched column semantic response is not a JSON object")
+            missing = [column for column in dataset.columns if column not in parsed]
+            if missing:
+                raise ValueError(f"batched column semantic response is missing columns: {missing}")
+
+            return [str(parsed[column_name]) for column_name in dataset.columns]
+
+        except Exception:
+            # Malformed / incomplete batched response: fall back to per-column calls
+            return self._generate_column_semantic_per_column(dataset, description, column_types)
+
+    def _generate_column_semantic_per_column(
         self,
         dataset: pd.DataFrame,
         description: str,

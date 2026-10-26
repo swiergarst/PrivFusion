@@ -1,5 +1,6 @@
 """Integration tests for the complete data alignment workflow."""
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -77,37 +78,45 @@ class TestEndToEndWorkflow:
     def test_analyze_and_consolidate_covid_datasets(self, mock_llm, sample_covid_datasets):
         """Test analyzing and consolidating COVID datasets."""
         # Mock DatasetAnalyzer responses
+        # Call order per dataset: structure description, description, batched
+        # column semantics (single JSON response), topics, relationships
         analyzer_responses = [
-            # Oxford dataset description
-            {"response": "COVID-19 data from Oxford", "usage": {"total_tokens": 20}},
-            # Column semantics (5 columns)
-            {"response": "Geographic location", "usage": {"total_tokens": 10}},
-            {"response": "Date of record", "usage": {"total_tokens": 10}},
-            {"response": "Cumulative cases", "usage": {"total_tokens": 10}},
-            {"response": "Daily new cases", "usage": {"total_tokens": 10}},
-            {"response": "Total population", "usage": {"total_tokens": 10}},
-            # Topics
-            {"response": "COVID-19\nPandemic\nEpidemiology", "usage": {"total_tokens": 15}},
-            # Structure description
+            # Oxford
             {"response": "COVID-19 time series data", "usage": {"total_tokens": 15}},
-            # Relationships
+            {"response": "COVID-19 data from Oxford", "usage": {"total_tokens": 20}},
+            {
+                "response": json.dumps(
+                    {
+                        "location": "Geographic location",
+                        "date": "Date of record",
+                        "total_cases": "Cumulative cases",
+                        "new_cases": "Daily new cases",
+                        "population": "Total population",
+                    }
+                ),
+                "usage": {"total_tokens": 30},
+            },
+            {"response": "COVID-19\nPandemic\nEpidemiology", "usage": {"total_tokens": 15}},
             {
                 "response": "date -> total_cases := cumulative over time\ndate -> new_cases := daily increment",
                 "usage": {"total_tokens": 20},
             },
-            # Indonesia dataset description
-            {"response": "COVID-19 data from Indonesia", "usage": {"total_tokens": 20}},
-            # Column semantics (5 columns)
-            {"response": "Country name", "usage": {"total_tokens": 10}},
-            {"response": "Report date", "usage": {"total_tokens": 10}},
-            {"response": "Confirmed cases", "usage": {"total_tokens": 10}},
-            {"response": "Daily confirmed", "usage": {"total_tokens": 10}},
-            {"response": "Population count", "usage": {"total_tokens": 10}},
-            # Topics
-            {"response": "COVID-19\nIndonesia\nPublic Health", "usage": {"total_tokens": 15}},
-            # Structure description
+            # Indonesia
             {"response": "Indonesian COVID-19 tracking data", "usage": {"total_tokens": 15}},
-            # Relationships
+            {"response": "COVID-19 data from Indonesia", "usage": {"total_tokens": 20}},
+            {
+                "response": json.dumps(
+                    {
+                        "country": "Country name",
+                        "report_date": "Report date",
+                        "confirmed": "Confirmed cases",
+                        "daily_confirmed": "Daily confirmed",
+                        "total_population": "Population count",
+                    }
+                ),
+                "usage": {"total_tokens": 30},
+            },
+            {"response": "COVID-19\nIndonesia\nPublic Health", "usage": {"total_tokens": 15}},
             {"response": "report_date -> confirmed := cumulative tracking", "usage": {"total_tokens": 15}},
         ]
         mock_llm.chat.side_effect = analyzer_responses
@@ -349,41 +358,70 @@ class TestEndToEndWorkflow:
                 consolidator.consolidate(datasets, mock_llm)
 
     def _create_patient_analysis_responses(self):
-        """Helper to create mock responses for patient data analysis."""
+        """Helper to create mock responses for patient data analysis.
+
+        Call order per dataset: structure description, description, batched
+        column semantics (single JSON response), topics, relationships.
+        """
         return [
             # Hospital A
-            {"response": "Hospital A patient data", "usage": {"total_tokens": 20}},
-            {"response": "Patient identifier", "usage": {"total_tokens": 10}},
-            {"response": "Patient age", "usage": {"total_tokens": 10}},
-            {"response": "Patient gender", "usage": {"total_tokens": 10}},
-            {"response": "Admission date", "usage": {"total_tokens": 10}},
-            {"response": "Medical diagnosis", "usage": {"total_tokens": 10}},
-            {"response": "Healthcare\nPatient Records", "usage": {"total_tokens": 15}},
             {"response": "Patient demographic and medical data", "usage": {"total_tokens": 15}},
+            {"response": "Hospital A patient data", "usage": {"total_tokens": 20}},
+            {
+                "response": json.dumps(
+                    {
+                        "patient_id": "Patient identifier",
+                        "age": "Patient age",
+                        "gender": "Patient gender",
+                        "admission_date": "Admission date",
+                        "diagnosis": "Medical diagnosis",
+                    }
+                ),
+                "usage": {"total_tokens": 30},
+            },
+            {"response": "Healthcare\nPatient Records", "usage": {"total_tokens": 15}},
             {"response": "patient_id -> diagnosis := identifies patient condition", "usage": {"total_tokens": 15}},
             # Hospital B
-            {"response": "Hospital B patient data", "usage": {"total_tokens": 20}},
-            {"response": "Patient ID", "usage": {"total_tokens": 10}},
-            {"response": "Age in years", "usage": {"total_tokens": 10}},
-            {"response": "Patient sex", "usage": {"total_tokens": 10}},
-            {"response": "Date of admission", "usage": {"total_tokens": 10}},
-            {"response": "Medical condition", "usage": {"total_tokens": 10}},
-            {"response": "Healthcare\nMedical Records", "usage": {"total_tokens": 15}},
             {"response": "Patient information and conditions", "usage": {"total_tokens": 15}},
+            {"response": "Hospital B patient data", "usage": {"total_tokens": 20}},
+            {
+                "response": json.dumps(
+                    {
+                        "id": "Patient ID",
+                        "years_old": "Age in years",
+                        "sex": "Patient sex",
+                        "admit_date": "Date of admission",
+                        "condition": "Medical condition",
+                    }
+                ),
+                "usage": {"total_tokens": 30},
+            },
+            {"response": "Healthcare\nMedical Records", "usage": {"total_tokens": 15}},
             {"response": "id -> condition := patient medical status", "usage": {"total_tokens": 15}},
         ]
 
     def _create_single_dataset_analysis_responses(self):
-        """Helper to create mock responses for single dataset analysis."""
+        """Helper to create mock responses for single dataset analysis.
+
+        Call order: structure description, description, batched column
+        semantics (single JSON response), topics, relationships.
+        """
         return [
-            {"response": "Hospital A patient data", "usage": {"total_tokens": 20}},
-            {"response": "Patient identifier", "usage": {"total_tokens": 10}},
-            {"response": "Patient age", "usage": {"total_tokens": 10}},
-            {"response": "Patient gender", "usage": {"total_tokens": 10}},
-            {"response": "Admission date", "usage": {"total_tokens": 10}},
-            {"response": "Medical diagnosis", "usage": {"total_tokens": 10}},
-            {"response": "Healthcare\nPatient Records", "usage": {"total_tokens": 15}},
             {"response": "Patient demographic and medical data", "usage": {"total_tokens": 15}},
+            {"response": "Hospital A patient data", "usage": {"total_tokens": 20}},
+            {
+                "response": json.dumps(
+                    {
+                        "patient_id": "Patient identifier",
+                        "age": "Patient age",
+                        "gender": "Patient gender",
+                        "admission_date": "Admission date",
+                        "diagnosis": "Medical diagnosis",
+                    }
+                ),
+                "usage": {"total_tokens": 30},
+            },
+            {"response": "Healthcare\nPatient Records", "usage": {"total_tokens": 15}},
             {"response": "patient_id -> diagnosis := identifies patient condition", "usage": {"total_tokens": 15}},
         ]
 
