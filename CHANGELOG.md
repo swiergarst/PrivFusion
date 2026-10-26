@@ -16,6 +16,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pre-commit hooks configuration
 - Type hints throughout the codebase
 
+### Performance
+- Batched per-column semantic extraction into a single LLM call per dataset
+  (with per-column fallback on malformed responses)
+- Synthetic-data fitting runs on a 2000-row sample instead of the full frame
+- `extract_types` caps the number of unique values checked per column
+- Per-dataset analysis/synthesis and local agent runs execute concurrently
+  (bounded to 2 concurrent jobs)
+- Local agent user message only includes columns that need a transformation
+- Agent session snapshots are capped to the last 3 frames
+
+### Fixed
+- Run no longer aborts with `NameError` when the local agent hits its
+  recursion limit; committed steps are kept and reported
+- `WillmaLLM.chat` retries transient failures (timeout/5xx/error body) with
+  backoff and raises instead of returning an empty result
+
 ### Changed
 - Updated setup.cfg with proper metadata and classifiers
 - Improved requirements.txt with version pinning

@@ -1,5 +1,6 @@
 """Edge case tests for DatasetAnalyzer class."""
 
+import json
 from unittest.mock import MagicMock
 
 import pandas as pd
@@ -256,13 +257,16 @@ class TestDatasetAnalyzerEdgeCases:
         """Test relationship extraction with malformed format."""
         df = pd.DataFrame({"col1": [1, 2], "col2": [3, 4]})
 
-        # Mock responses with malformed relationship format
+        # Call order: structure description, description, batched column
+        # semantics (single JSON response), topics, relationships
         responses = [
-            {"response": "Dataset description", "usage": {"total_tokens": 10}},
-            {"response": "Column semantic 1", "usage": {"total_tokens": 10}},
-            {"response": "Column semantic 2", "usage": {"total_tokens": 10}},
-            {"response": "Topic1\nTopic2", "usage": {"total_tokens": 10}},
             {"response": "Structure description", "usage": {"total_tokens": 10}},
+            {"response": "Dataset description", "usage": {"total_tokens": 10}},
+            {
+                "response": json.dumps({"col1": "Column semantic 1", "col2": "Column semantic 2"}),
+                "usage": {"total_tokens": 10},
+            },
+            {"response": "Topic1\nTopic2", "usage": {"total_tokens": 10}},
             {
                 "response": "col1 -> col2 := valid relationship\nmalformed line without arrow\ncol3 col4 no arrow or delimiter\n",
                 "usage": {"total_tokens": 20},
@@ -282,12 +286,16 @@ class TestDatasetAnalyzerEdgeCases:
         """Test relationship extraction with empty response."""
         df = pd.DataFrame({"col1": [1, 2], "col2": [3, 4]})
 
+        # Call order: structure description, description, batched column
+        # semantics (single JSON response), topics, relationships
         responses = [
-            {"response": "Dataset description", "usage": {"total_tokens": 10}},
-            {"response": "Column semantic 1", "usage": {"total_tokens": 10}},
-            {"response": "Column semantic 2", "usage": {"total_tokens": 10}},
-            {"response": "Topic1", "usage": {"total_tokens": 10}},
             {"response": "Structure description", "usage": {"total_tokens": 10}},
+            {"response": "Dataset description", "usage": {"total_tokens": 10}},
+            {
+                "response": json.dumps({"col1": "Column semantic 1", "col2": "Column semantic 2"}),
+                "usage": {"total_tokens": 10},
+            },
+            {"response": "Topic1", "usage": {"total_tokens": 10}},
             {"response": "", "usage": {"total_tokens": 5}},
         ]
         mock_llm.chat.side_effect = responses
@@ -301,12 +309,16 @@ class TestDatasetAnalyzerEdgeCases:
         """Test relationship extraction with extra whitespace."""
         df = pd.DataFrame({"col1": [1, 2], "col2": [3, 4]})
 
+        # Call order: structure description, description, batched column
+        # semantics (single JSON response), topics, relationships
         responses = [
-            {"response": "Dataset description", "usage": {"total_tokens": 10}},
-            {"response": "Column semantic 1", "usage": {"total_tokens": 10}},
-            {"response": "Column semantic 2", "usage": {"total_tokens": 10}},
-            {"response": "Topic1", "usage": {"total_tokens": 10}},
             {"response": "Structure description", "usage": {"total_tokens": 10}},
+            {"response": "Dataset description", "usage": {"total_tokens": 10}},
+            {
+                "response": json.dumps({"col1": "Column semantic 1", "col2": "Column semantic 2"}),
+                "usage": {"total_tokens": 10},
+            },
+            {"response": "Topic1", "usage": {"total_tokens": 10}},
             {
                 "response": "  col1   ->   col2   :=   relationship with spaces  \n\n\ncol2 -> col1 := another relationship\n  ",
                 "usage": {"total_tokens": 25},
@@ -415,3 +427,92 @@ class TestDatasetAnalyzerEdgeCases:
         assert result.name == "categorical"
         assert len(result.structure.names) == 2
         assert "category" in result.structure.types[0]
+
+
+class TestBatchedColumnSemantic:
+    """Tests for the batched column-semantic call (one LLM call, JSON response)."""
+
+    def test_batched_single_call(self, mock_llm, mock_config):
+        """A valid JSON batch response means exactly one column-semantic call."""
+        df = pd.DataFrame({"col1": [1, 2], "col2": ["a", "b"]})
+
+        responses = [
+            {"response": "Structure", "usage": {"total_tokens": 10}},
+            {"response": "Description", "usage": {"total_tokens": 10}},
+            {"response": json.dumps({"col1": "sem 1", "col2": "sem 2"}), "usage": {"total_tokens": 10}},
+            {"response": "Topic1", "usage": {"total_tokens": 10}},
+            {"response": "", "usage": {"total_tokens": 5}},
+        ]
+        mock_llm.chat.side_effect = responses
+
+        analyzer = DatasetAnalyzer(mock_llm, mock_config)
+        result = analyzer.extract_information_from_dataset("ds", df)
+
+        assert result.semantic.column_semantic == ["sem 1", "sem 2"]
+        # structure, description, batched semantics, topics, relationships
+        assert mock_llm.chat.call_count == 5
+
+    def test_batched_fenced_json(self, mock_llm, mock_config):
+        """A markdown-fenced JSON batch response is still parsed."""
+        df = pd.DataFrame({"col1": [1, 2], "col2": ["a", "b"]})
+
+        responses = [
+            {"response": "Structure", "usage": {"total_tokens": 10}},
+            {"response": "Description", "usage": {"total_tokens": 10}},
+            {
+                "response": '```json\n{"col1": "sem 1", "col2": "sem 2"}\n```',
+                "usage": {"total_tokens": 10},
+            },
+            {"response": "Topic1", "usage": {"total_tokens": 10}},
+            {"response": "", "usage": {"total_tokens": 5}},
+        ]
+        mock_llm.chat.side_effect = responses
+
+        analyzer = DatasetAnalyzer(mock_llm, mock_config)
+        result = analyzer.extract_information_from_dataset("ds", df)
+
+        assert result.semantic.column_semantic == ["sem 1", "sem 2"]
+        assert mock_llm.chat.call_count == 5
+
+    def test_batched_falls_back_on_malformed(self, mock_llm, mock_config):
+        """A non-JSON batch response falls back to per-column calls."""
+        df = pd.DataFrame({"col1": [1, 2], "col2": ["a", "b"]})
+
+        responses = [
+            {"response": "Structure", "usage": {"total_tokens": 10}},
+            {"response": "Description", "usage": {"total_tokens": 10}},
+            {"response": "not json at all", "usage": {"total_tokens": 10}},  # batch -> fail
+            {"response": "sem col1", "usage": {"total_tokens": 10}},  # per-column fallback
+            {"response": "sem col2", "usage": {"total_tokens": 10}},  # per-column fallback
+            {"response": "Topic1", "usage": {"total_tokens": 10}},
+            {"response": "", "usage": {"total_tokens": 5}},
+        ]
+        mock_llm.chat.side_effect = responses
+
+        analyzer = DatasetAnalyzer(mock_llm, mock_config)
+        result = analyzer.extract_information_from_dataset("ds", df)
+
+        assert result.semantic.column_semantic == ["sem col1", "sem col2"]
+        # structure, description, failed batch, 2 per-column, topics, relationships
+        assert mock_llm.chat.call_count == 7
+
+    def test_batched_falls_back_on_missing_column(self, mock_llm, mock_config):
+        """A batch response missing a column falls back to per-column calls."""
+        df = pd.DataFrame({"col1": [1, 2], "col2": ["a", "b"]})
+
+        responses = [
+            {"response": "Structure", "usage": {"total_tokens": 10}},
+            {"response": "Description", "usage": {"total_tokens": 10}},
+            {"response": json.dumps({"col1": "sem 1"}), "usage": {"total_tokens": 10}},  # missing col2
+            {"response": "sem col1", "usage": {"total_tokens": 10}},
+            {"response": "sem col2", "usage": {"total_tokens": 10}},
+            {"response": "Topic1", "usage": {"total_tokens": 10}},
+            {"response": "", "usage": {"total_tokens": 5}},
+        ]
+        mock_llm.chat.side_effect = responses
+
+        analyzer = DatasetAnalyzer(mock_llm, mock_config)
+        result = analyzer.extract_information_from_dataset("ds", df)
+
+        assert result.semantic.column_semantic == ["sem col1", "sem col2"]
+        assert mock_llm.chat.call_count == 7

@@ -393,11 +393,21 @@ def get_type_mapping(df: pd.DataFrame) -> list[str | None]:
     return [identifier_mapping[t] if t is not None else None for t in extract_types(df)]
 
 
-def extract_types(df: pd.DataFrame) -> list[str | None]:
+def extract_types(df: pd.DataFrame, max_values: int = 5000) -> list[str | None]:
+    """Classify each column against the known identifiers.
+
+    Columns with more than ``max_values`` unique values are checked on a
+    deterministic random sample of that size: the per-value identifier checks
+    are pure Python and dominate runtime on columns with many unique values
+    (e.g. floats with thousands of distinct values). The trade-off is that
+    very rare values in a column may not be seen.
+    """
     d_types: list[str | None] = []
 
     for col in df.columns:
         data = df[col].unique()
+        if len(data) > max_values:
+            data = pd.Series(data).sample(n=max_values, random_state=0).to_numpy()
 
         counters: dict[str, int] = {}
 

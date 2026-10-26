@@ -458,3 +458,32 @@ class TestTypeClassificationEdgeCases:
 
         assert len(mappings) == 10
         assert all(m == "http://www.w3.org/2001/XMLSchema#Number" for m in mappings)
+
+
+class TestExtractTypesValueCap:
+    """Tests for the per-column unique-value cap (performance)."""
+
+    def test_large_column_still_classified(self):
+        """A column with more unique values than the cap is still classified."""
+        df = pd.DataFrame({"v": [float(i) for i in range(10000)]})
+
+        assert extract_types(df) == ["Numeric"]
+        assert get_type_mapping(df) == ["http://www.w3.org/2001/XMLSchema#Number"]
+
+    def test_large_column_deterministic(self):
+        """The sampled subset (and thus the result) is deterministic."""
+        df = pd.DataFrame({"v": [float(i) for i in range(10000)]})
+
+        assert extract_types(df) == extract_types(df)
+
+    def test_explicit_max_values(self):
+        """max_values can be lowered to force sampling."""
+        df = pd.DataFrame({"v": list(range(6000))})
+
+        assert extract_types(df, max_values=1000) == ["Numeric"]
+
+    def test_small_column_unaffected(self):
+        """Columns with few unique values are checked in full."""
+        df = pd.DataFrame({"v": [1.0, 2.0, 3.0]})
+
+        assert extract_types(df) == ["Numeric"]

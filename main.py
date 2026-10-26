@@ -1,4 +1,5 @@
 ## Main entrypoint, combining federated harmonization and local modifications
+import concurrent.futures
 import json
 import logging
 import os
@@ -21,6 +22,12 @@ from privfusion.dataset_analyzer import DatasetAnalyzer
 from setup_logging import consoleLogger
 
 FMT = logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s")
+
+# rows used to fit the per-column synthesizers: only a handful of synthetic
+# rows are ever sampled, and fitting on the full frame per column is slow
+SYNTH_FIT_SAMPLE_SIZE = 2000
+# max concurrent LLM-driven jobs (analyzer/synthesizer + local agent per dataset)
+MAX_CONCURRENT_DATASETS = 2
 
 
 # class stopwatch():
@@ -67,6 +74,9 @@ def local_client_fn(dataset_name: str, data_path: str) -> dict:
 
     synthetic_df = pd.DataFrame()
     num_rows = 5
+    # Fit on a row sample: detect+fit per column on the full frame takes
+    # minutes, while a few thousand rows are plenty to synthesize `num_rows` rows.
+    fit_data = dataset.sample(n=min(SYNTH_FIT_SAMPLE_SIZE, len(dataset)), random_state=0)
     for column in dataset.columns:
         # print(dataset[[column]].shape)
         with warnings.catch_warnings():
@@ -75,9 +85,12 @@ def local_client_fn(dataset_name: str, data_path: str) -> dict:
             if col_df.isna().sum().sum() == col_df.shape[0]:  # column has only NaN's
                 synthetic_df[column] = col_df.loc[:num_rows]
                 continue
-            metadata = Metadata.detect_from_dataframes(data={column: dataset[[column]].dropna()})
+            sample_col = fit_data[[column]].dropna()
+            if sample_col.empty:  # non-null values were all missed by the sample; use them directly
+                sample_col = col_df.dropna().head(num_rows)
+            metadata = Metadata.detect_from_dataframes(data={column: sample_col})
             synth = GaussianCopulaSynthesizer(metadata)
-            synth.fit({column: dataset[[column]].dropna()})
+            synth.fit({column: sample_col})
             synthetic_column = synth.sample(num_rows=num_rows)[column]
             synthetic_df[column] = synthetic_column
 
@@ -86,10 +99,19 @@ def local_client_fn(dataset_name: str, data_path: str) -> dict:
 
 # see local fn: these should both disappear in actual application
 def central_fn(dataset_names: list, dataset_paths: list):
+    # Analysis + synthesis per dataset is I/O-bound (LLM calls); run the
+    # datasets concurrently, bounded so we stay within the endpoint's limits.
     round_results = {}
-    for dataset_name, dataset_path in zip(dataset_names, dataset_paths, strict=False):
-        client_name, client_result = local_client_fn(dataset_name, dataset_path)
-        round_results[client_name] = client_result
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=max(1, min(MAX_CONCURRENT_DATASETS, len(dataset_names)))
+    ) as executor:
+        futures = [
+            executor.submit(local_client_fn, dataset_name, dataset_path)
+            for dataset_name, dataset_path in zip(dataset_names, dataset_paths, strict=False)
+        ]
+        for future in futures:  # submission order -> deterministic result order
+            client_name, client_result = future.result()
+            round_results[client_name] = client_result
 
     llm = WillmaLLM(model_name=os.environ.get("HARM_LLM_MODEL"))
     consolidator = Consolidator()
@@ -141,36 +163,47 @@ def main(config_path: str = "config.yaml"):
         consoleLogger.info("finished consolidating, starting local modifications..")
         # TODO: this should be separated across clients
         new_dataset_config = []
-        for dataset_config in datasets_config:
-            dataset_name = dataset_config["name"]
-            dataset_path = dataset_config["path"]
-            instructions = federated_result.loc[federated_result["dataset"] == dataset_name]
-            agent = CSVAgent()
-            local_result = agent.run(dataset_name, dataset_path, instructions)
-            if config["save_intermediate"]:
-                with open(f"logs/local_results_{dataset_name}_round_{round}_id_{run_id}.json", "w") as fp:
-                    # output_csv is the modified DataFrame (written as checkpoint); not JSON-serializable
-                    json.dump({k: v for k, v in asdict(local_result).items() if k != "output_csv"}, fp, indent=2)
+        # The agent runs are I/O-bound (LLM calls); run the datasets
+        # concurrently, bounded to MAX_CONCURRENT_DATASETS. Side effects
+        # (saving, checkpoint writing) happen in the main thread in order.
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=max(1, min(MAX_CONCURRENT_DATASETS, len(datasets_config)))
+        ) as executor:
+            agent_futures = {}
+            for dataset_config in datasets_config:
+                dataset_name = dataset_config["name"]
+                dataset_path = dataset_config["path"]
+                instructions = federated_result.loc[federated_result["dataset"] == dataset_name]
+                agent = CSVAgent()
+                agent_futures[dataset_name] = executor.submit(agent.run, dataset_name, dataset_path, instructions)
 
-            if not local_result.success:
-                consoleLogger.error(f"Agent failed: {local_result.error}")
-                consoleLogger.error(f"({len(local_result.steps)} step(s) had been committed; nothing was written.)")
-                raise SystemExit(1)
+            for dataset_config in datasets_config:
+                dataset_name = dataset_config["name"]
+                local_result = agent_futures[dataset_name].result()
+                if config["save_intermediate"]:
+                    with open(f"logs/local_results_{dataset_name}_round_{round}_id_{run_id}.json", "w") as fp:
+                        # output_csv is the modified DataFrame (written as checkpoint); not JSON-serializable
+                        json.dump({k: v for k, v in asdict(local_result).items() if k != "output_csv"}, fp, indent=2)
 
-            consoleLogger.info(
-                f"Replay check: {'PASS' if local_result.replay_ok else 'FAIL'} - {local_result.replay_message}"
-            )
+                if not local_result.success:
+                    consoleLogger.error(f"Agent failed: {local_result.error}")
+                    consoleLogger.error(f"({len(local_result.steps)} step(s) had been committed; nothing was written.)")
+                    raise SystemExit(1)
 
-            new_dataset_path = (
-                Path(config["dataset_checkpoints_path"]) / f"{dataset_name}_modified_round{round}_{run_id}.csv"
-            )
-            local_result.output_csv.to_csv(new_dataset_path)
-            local_dataset_config = {"name": dataset_name, "path": new_dataset_path}
-            new_dataset_config.append(local_dataset_config)
+                consoleLogger.info(
+                    f"Replay check: {'PASS' if local_result.replay_ok else 'FAIL'} - {local_result.replay_message}"
+                )
 
-            if config["save_intermediate"]:
-                script_path = Path(config["script_path"]) / f"{dataset_name}_reproduce_round_{round}_{run_id}.py"
-                script_path.write_text(local_result.script)
+                new_dataset_path = (
+                    Path(config["dataset_checkpoints_path"]) / f"{dataset_name}_modified_round{round}_{run_id}.csv"
+                )
+                local_result.output_csv.to_csv(new_dataset_path)
+                local_dataset_config = {"name": dataset_name, "path": new_dataset_path}
+                new_dataset_config.append(local_dataset_config)
+
+                if config["save_intermediate"]:
+                    script_path = Path(config["script_path"]) / f"{dataset_name}_reproduce_round_{round}_{run_id}.py"
+                    script_path.write_text(local_result.script)
 
         # TODO: implement early stopping if there are no modifications in the new round
 

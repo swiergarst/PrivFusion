@@ -60,6 +60,9 @@ fileLogger = logging.getLogger("localModifLogger")
 # --------------------------------------------------------------------------- #
 RECURSION_LIMIT = 40  # hard cap on agent steps (model + tool calls)
 MAX_TOOL_OUTPUT_CHARS = 4000
+# undo only ever rolls back the most recent step, so keep only the last N
+# snapshots (each is a full copy of the working DataFrame)
+MAX_SNAPSHOTS = 3
 OUTPUT_DIR = Path("outputs")
 
 SYSTEM_PROMPT = """\
@@ -332,6 +335,8 @@ def build_tools(session: Session) -> list:
             return error_msg
 
         session.snapshots.append(session.working)
+        if len(session.snapshots) > MAX_SNAPSHOTS:
+            session.snapshots.pop(0)
         session.working = candidate
         session.steps.append(Step(description=description, code=code))
 
@@ -525,11 +530,22 @@ class CSVAgent:
             tools=build_tools(session),
             system_prompt=SYSTEM_PROMPT,
         )
-        instr_text = instruction.drop(columns="dataset").to_csv(index=False)
+        instr = instruction.drop(columns="dataset")
+        # Only rows with a transformation actually need work; the rest (e.g.
+        # cluster 9999) just bloat the context sent with every LLM step.
+        actionable = instr[instr["transformation"].notna()]
+        unchanged = [str(name) for name in instr[instr["transformation"].isna()]["feature_name"]]
+        instr_text = actionable.to_csv(index=False)
+        unchanged_note = (
+            f"\nNo changes are needed for the following columns, do not modify them: {', '.join(unchanged)}"
+            if unchanged
+            else ""
+        )
         user_msg = (
             f"Columns/dtypes:\n{original.dtypes.to_string()}\n\n"
             f"Sample rows:\n{original.head(5).to_csv(index=False)}\n\n"
-            f"Instructions (one row per column):\n{instr_text}"
+            f"Instructions (one row per column, only columns that need a transformation):\n{instr_text}"
+            f"{unchanged_note}"
         )
 
         try:
@@ -537,6 +553,7 @@ class CSVAgent:
                 system_prompt=SYSTEM_PROMPT, tools=build_tools(session), user_msg=user_msg, label="initial"
             )
             fileLogger.info(f">>> LLM REQUEST <<<\n{user_msg}")
+            state = None
             try:
                 state = agent.invoke(
                     {"messages": [{"role": "user", "content": user_msg}]},
@@ -545,11 +562,14 @@ class CSVAgent:
             except GraphRecursionError:
                 fileLogger.warning("Hit graphRecursionLimit, returning with current state..")
 
-            fileLogger.info(f'>>> LLM RESPONSE <<<\n{_format_messages_for_logging(state["messages"])}')
+            if state is not None:
+                fileLogger.info(f">>> LLM RESPONSE <<<\n{_format_messages_for_logging(state['messages'])}")
+                summary = _message_text(state["messages"][-1])
+            else:
+                summary = "Agent hit the recursion limit before producing a final summary; committed steps were kept."
             fileLogger.info("--------------------------------------------------------------")
-            summary = _message_text(state["messages"][-1])
 
-        except Exception as e:  # includes GraphRecursionError
+        except Exception as e:
             return AgentResult(success=False, steps=session.steps, error=f"{type(e).__name__}: {e}")
 
         # --- Verify, then write outputs ---------------------------------- #
